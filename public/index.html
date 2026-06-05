@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Голосовой чат с шумоподавлением</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: white;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(20px);
+            border-radius: 30px;
+            padding: 40px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .join-screen, .chat-screen {
+            transition: all 0.3s ease;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        input {
+            width: 100%;
+            padding: 15px;
+            border: 2px solid rgba(255,255,255,0.2);
+            border-radius: 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            font-size: 1em;
+            outline: none;
+            transition: all 0.3s;
+        }
+
+        input:focus {
+            border-color: white;
+            background: rgba(255,255,255,0.2);
+        }
+
+        input::placeholder {
+            color: rgba(255,255,255,0.5);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 15px;
+            border: none;
+            border-radius: 15px;
+            font-size: 1.1em;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .btn-primary {
+            background: white;
+            color: #667eea;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn-control {
+            flex: 1;
+            min-width: 120px;
+            padding: 12px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-radius: 15px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-weight: 500;
+        }
+
+        .btn-control:hover {
+            background: rgba(255,255,255,0.2);
+        }
+
+        .btn-muted {
+            background: rgba(255, 0, 0, 0.3);
+            border-color: rgba(255, 0, 0, 0.5);
+        }
+
+        .users-list {
+            margin-top: 20px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .user-item {
+            padding: 10px;
+            margin: 5px 0;
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #4CAF50;
+        }
+
+        .status-muted {
+            background: #f44336;
+        }
+
+        .volume-indicator {
+            margin-top: 15px;
+            padding: 10px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 10px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+
+        .noise-status {
+            margin-top: 10px;
+            padding: 8px;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            font-size: 0.8em;
+            text-align: center;
+        }
+
+        .error-message {
+            color: #ff6b6b;
+            margin-top: 10px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Экран присоединения -->
+        <div id="joinScreen" class="join-screen">
+            <h1>🎙️ Голосовой Чат</h1>
+            <div class="input-group">
+                <label>Ваше имя:</label>
+                <input type="text" id="userName" placeholder="Введите имя" value="Пользователь">
+            </div>
+            <div class="input-group">
+                <label>ID комнаты:</label>
+                <input type="text" id="roomId" placeholder="Введите ID комнаты" value="general">
+            </div>
+            <button class="btn btn-primary" onclick="joinRoom()">Присоединиться</button>
+            <div id="errorMessage" class="error-message"></div>
+        </div>
+
+        <!-- Экран чата -->
+        <div id="chatScreen" class="chat-screen hidden">
+            <h1>🎙️ Комната: <span id="currentRoom"></span></h1>
+            
+            <div class="volume-indicator">
+                🔊 Уровень микрофона: <span id="volumeLevel">0%</span>
+            </div>
+            
+            <div class="noise-status" id="noiseStatus">
+                🎧 Шумоподавление: АКТИВНО
+            </div>
+
+            <div class="controls">
+                <button id="muteBtn" class="btn-control" onclick="toggleMute()">
+                    🔊 Микрофон
+                </button>
+                <button class="btn-control" onclick="leaveRoom()">
+                    🚪 Выйти
+                </button>
+            </div>
+
+            <div class="users-list" id="usersList">
+                <h3>👥 Участники:</h3>
+            </div>
+        </div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        // Глобальные переменные
+        let socket;
+        let audioContext;
+        let mediaStream;
+        let noiseFilter;
+        let isMuted = false;
+        let isConnected = false;
+        
+        // Web Audio API для шумоподавления
+        class NoiseSuppressor {
+            constructor(audioContext) {
+                this.context = audioContext;
+                this.noiseGate = audioContext.createGain();
+                this.analyser = audioContext.createAnalyser();
+                this.analyser.fftSize = 2048;
+                
+                // Создаем аудио фильтры
+                this.lowPass = audioContext.createBiquadFilter();
+                this.lowPass.type = 'lowpass';
+                this.lowPass.frequency.value = 8000; // Обрезаем высокие частоты
+                
+                this.highPass = audioContext.createBiquadFilter();
+                this.highPass.type = 'highpass';
+                this.highPass.frequency.value = 80; // Обрезаем низкие частоты (гул)
+                
+                // Компрессор для выравнивания громкости
+                this.compressor = audioContext.createDynamicsCompressor();
+                this.compressor.threshold.value = -50;
+                this.compressor.knee.value = 40;
+                this.compressor.ratio.value = 12;
+                this.compressor.attack.value = 0;
+                this.compressor.release.value = 0.25;
+            }
+
+            connect(source) {
+                // Цепочка обработки: source -> highPass -> lowPass -> compressor -> noiseGate -> analyser
+                source.connect(this.highPass);
+                this.highPass.connect(this.lowPass);
+                this.lowPass.connect(this.compressor);
+                this.compressor.connect(this.noiseGate);
+                this.noiseGate.connect(this.analyser);
+                
+                return this.analyser;
+            }
+
+            // Адаптивный шумовой порог
+            updateNoiseGate(level) {
+                // Динамически настраиваем гейт в зависимости от уровня сигнала
+                if (level < 0.01) {
+                    this.noiseGate.gain.value = 0; // Полная тишина при низком уровне
+                } else if (level < 0.05) {
+                    this.noiseGate.gain.value = level * 10; // Плавное увеличение
+                } else {
+                    this.noiseGate.gain.value = 1; // Нормальный уровень
+                }
+            }
+
+            disconnect() {
+                this.highPass.disconnect();
+                this.lowPass.disconnect();
+                this.compressor.disconnect();
+                this.noiseGate.disconnect();
+                this.analyser.disconnect();
+            }
+        }
+
+        // Инициализация WebSocket соединения
+        function initSocket() {
+            socket = io();
+
+            socket.on('connect', () => {
+                console.log('✅ Подключено к серверу');
+            });
+
+            socket.on('users-update', (users) => {
+                updateUsersList(users);
+            });
+
+            socket.on('user-connected', (user) => {
+                console.log(`${user.name} присоединился`);
+            });
+
+            socket.on('user-disconnected', (userId) => {
+                console.log(`Пользователь ${userId} отключился`);
+            });
+
+            socket.on('mute-status', (muted) => {
+                isMuted = muted;
+                updateMuteButton();
+            });
+
+            socket.on('audio-data', (data) => {
+                // Воспроизведение входящего аудио
+                playAudio(data.audio);
+            });
+
+            socket.on('disconnect', () => {
+                console.log('❌ Отключено от сервера');
+            });
+        }
+
+        // Присоединение к комнате
+        async function joinRoom() {
+            const userName = document.getElementById('userName').value.trim() || 'Гость';
+            const roomId = document.getElementById('roomId').value.trim() || 'general';
+            
+            try {
+                // Запрашиваем доступ к микрофону с шумоподавлением
+                const constraints = {
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true,
+                        sampleRate: 48000,
+                        channelCount: 1
+                    }
+                };
+                
+                mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+                
+                // Инициализируем Web Audio API
+                audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                    sampleRate: 48000
+                });
+                
+                // Создаем шумоподавитель
+                noiseFilter = new NoiseSuppressor(audioContext);
+                
+                // Подключаем микрофон к обработке
+                const source = audioContext.createMediaStreamSource(mediaStream);
+                const analyser = noiseFilter.connect(source);
+                
+                // Создаем поток для отправки
+                const destination = audioContext.createMediaStreamDestination();
+                analyser.connect(destination);
+                
+                // Присоединяемся к комнате
+                socket.emit('join-room', { roomId, userName });
+                
+                // Переключаем экраны
+                document.getElementById('joinScreen').classList.add('hidden');
+                document.getElementById('chatScreen').classList.remove('hidden');
+                document.getElementById('currentRoom').textContent = roomId;
+                
+                isConnected = true;
+                
+                // Запускаем мониторинг и отправку аудио
+                startAudioMonitoring(analyser);
+                startAudioSending(destination.stream);
+                
+            } catch (error) {
+                console.error('Ошибка:', error);
+                document.getElementById('errorMessage').textContent = 
+                    '❌ Ошибка доступа к микрофону: ' + error.message;
+            }
+        }
+
+        // Мониторинг уровня звука
+        function startAudioMonitoring(analyser) {
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            
+            function updateLevel() {
+                if (!isConnected) return;
+                
+                analyser.getByteTimeDomainData(dataArray);
+                
+                // Вычисляем RMS (среднеквадратичное значение)
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    const value = (dataArray[i] - 128) / 128;
+                    sum += value * value;
+                }
+                const rms = Math.sqrt(sum / dataArray.length);
+                
+                // Обновляем шумовой гейт
+                if (noiseFilter) {
+                    noiseFilter.updateNoiseGate(rms);
+                }
+                
+                // Отображаем уровень
+                const percentage = Math.min(100, Math.round(rms * 200));
+                document.getElementById('volumeLevel').textContent = percentage + '%';
+                
+                requestAnimationFrame(updateLevel);
+            }
+            
+            updateLevel();
+        }
+
+        // Отправка аудио
+        function startAudioSending(stream) {
+            const audioTrack = stream.getAudioTracks()[0];
+            
+            const sendInterval = setInterval(() => {
+                if (!isConnected || isMuted) return;
+                
+                // Здесь можно добавить дополнительную обработку
+                // Но WebRTC и так оптимизирует передачу
+                
+            }, 100);
+            
+            // Альтернатива: отправляем через MediaRecorder для лучшего контроля
+            const mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'audio/webm;codecs=opus',
+                audioBitsPerSecond: 32000
+            });
+            
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0 && !isMuted && isConnected) {
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const base64data = reader.result.split(',')[1];
+                        socket.emit('audio-data', base64data);
+                    };
+                    reader.readAsDataURL(event.data);
+                }
+            };
+            
+            mediaRecorder.start(100); // Отправляем каждые 100мс
+        }
+
+        // Воспроизведение аудио
+        function playAudio(base64Data) {
+            // Простое воспроизведение полученных аудио данных
+            // В реальном приложении лучше использовать WebRTC peer connections
+            try {
+                const audio = new Audio('data:audio/webm;base64,' + base64Data);
+                audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
+            } catch (error) {
+                console.error('Ошибка декодирования аудио:', error);
+            }
+        }
+
+        // Переключение мута
+        function toggleMute() {
+            if (!isConnected) return;
+            
+            socket.emit('toggle-mute');
+        }
+
+        // Обновление кнопки мута
+        function updateMuteButton() {
+            const muteBtn = document.getElementById('muteBtn');
+            if (isMuted) {
+                muteBtn.textContent = '🔇 Включен мут';
+                muteBtn.classList.add('btn-muted');
+            } else {
+                muteBtn.textContent = '🔊 Микрофон';
+                muteBtn.classList.remove('btn-muted');
+            }
+        }
+
+        // Обновление списка пользователей
+        function updateUsersList(users) {
+            const usersList = document.getElementById('usersList');
+            usersList.innerHTML = '<h3>👥 Участники:</h3>';
+            
+            users.forEach(user => {
+                const userElement = document.createElement('div');
+                userElement.className = 'user-item';
+                userElement.innerHTML = `
+                    <div class="status-indicator ${user.muted ? 'status-muted' : ''}"></div>
+                    <span>${user.name}</span>
+                    ${user.muted ? '<span style="font-size: 0.8em;">(🔇)</span>' : ''}
+                `;
+                usersList.appendChild(userElement);
+            });
+        }
+
+        // Выход из комнаты
+        function leaveRoom() {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+            }
+            
+            if (noiseFilter) {
+                noiseFilter.disconnect();
+            }
+            
+            if (audioContext) {
+                audioContext.close();
+            }
+            
+            if (socket) {
+                socket.disconnect();
+            }
+            
+            isConnected = false;
+            
+            document.getElementById('joinScreen').classList.remove('hidden');
+            document.getElementById('chatScreen').classList.add('hidden');
+            
+            // Переподключаем сокет
+            initSocket();
+        }
+
+        // Инициализация при загрузке
+        window.onload = () => {
+            initSocket();
+        };
+
+        // Очистка при закрытии
+        window.onbeforeunload = () => {
+            leaveRoom();
+        };
+    </script>
+</body>
+</html>
