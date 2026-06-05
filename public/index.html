@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Голосовой чат</title>
+    <title>Голосовой чат WebRTC</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -22,13 +22,11 @@
             padding: 40px;
             width: 90%;
             max-width: 500px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255,255,255,0.2);
         }
-        h1 { text-align: center; margin-bottom: 30px; font-size: 2.5em; font-weight: 300; }
+        h1 { text-align: center; margin-bottom: 30px; font-weight: 300; }
         .hidden { display: none !important; }
         .input-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9em; opacity: 0.9; }
+        label { display: block; margin-bottom: 8px; opacity: 0.9; font-size: 0.9em; }
         input {
             width: 100%; padding: 15px;
             border: 2px solid rgba(255,255,255,0.2);
@@ -42,12 +40,11 @@
             width: 100%; padding: 15px; border: none;
             border-radius: 15px; font-size: 1.1em;
             font-weight: 600; cursor: pointer;
-            transition: all 0.3s; text-transform: uppercase;
-            letter-spacing: 1px;
+            text-transform: uppercase; letter-spacing: 1px;
         }
         .btn-primary { background: white; color: #667eea; }
-        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .btn-primary:hover { transform: translateY(-2px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
         .controls { display: flex; gap: 15px; margin-top: 20px; }
         .btn-control {
             flex: 1; padding: 12px;
@@ -55,8 +52,7 @@
             border-radius: 15px;
             background: rgba(255,255,255,0.1);
             color: white; cursor: pointer;
-            transition: all 0.3s; font-weight: 500;
-            text-align: center;
+            font-weight: 500; text-align: center;
         }
         .btn-control:hover { background: rgba(255,255,255,0.2); }
         .btn-muted { background: rgba(255,0,0,0.5) !important; border-color: rgba(255,0,0,0.5) !important; }
@@ -80,14 +76,14 @@
         }
         .volume-fill {
             height: 5px; background: #4CAF50;
-            border-radius: 3px; transition: width 0.1s;
-            margin-top: 5px; width: 0%;
+            border-radius: 3px; width: 0%;
+            margin-top: 5px; transition: width 0.1s;
         }
         .status-text {
-            margin-top: 10px; padding: 8px;
+            margin: 10px 0; padding: 8px;
             background: rgba(0,0,0,0.2);
-            border-radius: 8px; font-size: 0.9em;
-            text-align: center;
+            border-radius: 8px;
+            font-size: 0.9em; text-align: center;
         }
         .error-message {
             color: #ff6b6b; margin-top: 10px;
@@ -144,29 +140,61 @@
     <script>
         const chatApp = {
             socket: null,
-            audioContext: null,
-            mediaStream: null,
-            processor: null,
+            localStream: null,
+            peerConnections: {},
             isMuted: false,
             isConnected: false,
-            playbackCtx: null,
-            // Буфер для сбора аудиоданных
-            audioBuffer: [],
-            bufferSize: 4096,
-            sendInterval: null,
+            audioContext: null,
+            analyser: null,
+
+            configuration: {
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]
+            },
 
             init() {
-                this.socket = io({ 
-                    transports: ['websocket', 'polling'],
-                    maxHttpBufferSize: 1e8
-                });
+                this.socket = io({ transports: ['websocket', 'polling'] });
 
                 this.socket.on('connect', () => console.log('✅ Подключен'));
                 
                 this.socket.on('users-update', (users) => this.renderUsers(users));
-                this.socket.on('user-connected', (user) => console.log('👤', user.name));
-                this.socket.on('user-disconnected', () => this.renderUsers([]));
-                
+
+                this.socket.on('user-joined', (user) => {
+                    console.log('👤', user.name, 'присоединился');
+                    this.createPeerConnection(user.id, true);
+                });
+
+                this.socket.on('user-left', (userId) => {
+                    console.log('👋', userId, 'отключился');
+                    this.closePeerConnection(userId);
+                });
+
+                this.socket.on('offer', async ({ offer, from, name }) => {
+                    console.log('📞 Offer от', name);
+                    const pc = this.createPeerConnection(from, false);
+                    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    this.socket.emit('answer', { answer, to: from });
+                });
+
+                this.socket.on('answer', async ({ answer, from }) => {
+                    console.log('✅ Answer от', from);
+                    const pc = this.peerConnections[from];
+                    if (pc) {
+                        await pc.setRemoteDescription(new RTCSessionDescription(answer));
+                    }
+                });
+
+                this.socket.on('ice-candidate', async ({ candidate, from }) => {
+                    const pc = this.peerConnections[from];
+                    if (pc && candidate) {
+                        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                    }
+                });
+
                 this.socket.on('user-mute-update', (data) => {
                     this.updateUserMute(data.userId, data.muted);
                 });
@@ -175,10 +203,74 @@
                     this.isMuted = muted;
                     this.updateMuteBtn();
                 });
+            },
 
-                this.socket.on('audio-stream', (data) => {
-                    this.playAudio(data.audio);
-                });
+            createPeerConnection(userId, isInitiator) {
+                if (this.peerConnections[userId]) return this.peerConnections[userId];
+
+                const pc = new RTCPeerConnection(this.configuration);
+                this.peerConnections[userId] = pc;
+
+                // Добавляем локальный аудио поток
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(track => {
+                        pc.addTrack(track, this.localStream);
+                    });
+                }
+
+                // Получаем удалённый аудио поток
+                pc.ontrack = (event) => {
+                    console.log('📡 Получен аудио поток от', userId);
+                    const audio = new Audio();
+                    audio.srcObject = event.streams[0];
+                    audio.autoplay = true;
+                    audio.play().catch(e => console.log('Play error:', e));
+                };
+
+                // Отправляем ICE кандидаты
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        this.socket.emit('ice-candidate', {
+                            candidate: event.candidate,
+                            to: userId
+                        });
+                    }
+                };
+
+                pc.onconnectionstatechange = () => {
+                    console.log(`🔗 Состояние с ${userId}: ${pc.connectionState}`);
+                    if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+                        this.closePeerConnection(userId);
+                    }
+                };
+
+                // Если мы инициатор - создаём offer
+                if (isInitiator) {
+                    this.createOffer(pc, userId);
+                }
+
+                return pc;
+            },
+
+            async createOffer(pc, userId) {
+                try {
+                    const offer = await pc.createOffer({
+                        offerToReceiveAudio: true,
+                        offerToReceiveVideo: false
+                    });
+                    await pc.setLocalDescription(offer);
+                    this.socket.emit('offer', { offer, to: userId });
+                } catch (e) {
+                    console.error('Ошибка создания offer:', e);
+                }
+            },
+
+            closePeerConnection(userId) {
+                const pc = this.peerConnections[userId];
+                if (pc) {
+                    pc.close();
+                    delete this.peerConnections[userId];
+                }
             },
 
             async joinRoom() {
@@ -190,75 +282,27 @@
                     joinBtn.disabled = true;
                     joinBtn.textContent = 'Подключение...';
 
-                    // Микрофон с высоким качеством
-                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                    // Получаем микрофон с Opus кодеком
+                    this.localStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             echoCancellation: true,
-                            noiseSuppression: false, // Выключаем встроенное шумоподавление
-                            autoGainControl: false,   // Выключаем AGC
+                            noiseSuppression: true,
+                            autoGainControl: true,
                             sampleRate: 48000,
-                            channelCount: 1
+                            channelCount: 1,
+                            // Opus кодек даёт лучшее качество для голоса
+                            codec: 'opus'
                         }
                     });
 
-                    // AudioContext 48kHz для качества
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                        sampleRate: 48000
-                    });
+                    // AudioContext для визуализации
+                    this.audioContext = new AudioContext();
+                    const source = this.audioContext.createMediaStreamSource(this.localStream);
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    source.connect(this.analyser);
 
-                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-                    
-                    // Шумоподавление своими руками
-                    const highPass = this.audioContext.createBiquadFilter();
-                    highPass.type = 'highpass';
-                    highPass.frequency.value = 80; // Режем гул
-                    
-                    const lowPass = this.audioContext.createBiquadFilter();
-                    lowPass.type = 'lowpass';
-                    lowPass.frequency.value = 8000; // Режем шум выше 8kHz
-                    
-                    const compressor = this.audioContext.createDynamicsCompressor();
-                    compressor.threshold.value = -30;
-                    compressor.knee.value = 20;
-                    compressor.ratio.value = 8;
-                    compressor.attack.value = 0.005;
-                    compressor.release.value = 0.1;
-
-                    // Анализатор
-                    const analyser = this.audioContext.createAnalyser();
-                    analyser.fftSize = 512;
-
-                    // ScriptProcessor с большим буфером для качества
-                    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
-                    
-                    // Цепочка обработки
-                    source.connect(highPass);
-                    highPass.connect(lowPass);
-                    lowPass.connect(compressor);
-                    compressor.connect(analyser);
-                    compressor.connect(this.processor);
-                    this.processor.connect(this.audioContext.destination);
-
-                    // Собираем и отправляем аудио
-                    this.processor.onaudioprocess = (e) => {
-                        if (!this.isMuted && this.isConnected) {
-                            const input = e.inputBuffer.getChannelData(0);
-                            this.audioBuffer.push(...Array.from(input));
-                            
-                            // Отправляем когда накопилось достаточно
-                            if (this.audioBuffer.length >= this.bufferSize) {
-                                this.sendAudioChunk();
-                            }
-                        }
-                    };
-
-                    // Периодическая отправка остатков
-                    this.sendInterval = setInterval(() => {
-                        if (this.audioBuffer.length > 0 && !this.isMuted && this.isConnected) {
-                            this.sendAudioChunk();
-                        }
-                    }, 50);
-
+                    // Входим в комнату
                     this.socket.emit('join-room', { roomId, userName });
 
                     document.getElementById('joinScreen').classList.add('hidden');
@@ -267,7 +311,7 @@
                     document.getElementById('connectionStatus').textContent = '🟢 Онлайн';
                     
                     this.isConnected = true;
-                    this.startVolume(analyser);
+                    this.startVolume();
 
                 } catch (error) {
                     console.error('Ошибка:', error);
@@ -277,75 +321,13 @@
                 }
             },
 
-            sendAudioChunk() {
-                // Берём кусок буфера
-                const chunk = this.audioBuffer.splice(0, this.bufferSize);
-                
-                // Float32 -> Int16
-                const int16 = new Int16Array(chunk.length);
-                for (let i = 0; i < chunk.length; i++) {
-                    const s = Math.max(-1, Math.min(1, chunk[i]));
-                    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-                }
-                
-                // В base64
-                const uint8 = new Uint8Array(int16.buffer);
-                let binary = '';
-                for (let i = 0; i < uint8.length; i++) {
-                    binary += String.fromCharCode(uint8[i]);
-                }
-                
-                this.socket.emit('audio-stream', btoa(binary));
-            },
-
-            playAudio(base64Data) {
-                try {
-                    const binary = atob(base64Data);
-                    const uint8 = new Uint8Array(binary.length);
-                    for (let i = 0; i < binary.length; i++) {
-                        uint8[i] = binary.charCodeAt(i);
-                    }
-                    
-                    const int16 = new Int16Array(uint8.buffer);
-                    const float32 = new Float32Array(int16.length);
-                    
-                    // Плавное преобразование
-                    for (let i = 0; i < int16.length; i++) {
-                        float32[i] = int16[i] / 32768.0;
-                    }
-                    
-                    if (!this.playbackCtx) {
-                        this.playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
-                            sampleRate: 48000
-                        });
-                    }
-                    
-                    const buffer = this.playbackCtx.createBuffer(1, float32.length, 48000);
-                    buffer.getChannelData(0).set(float32);
-                    
-                    const source = this.playbackCtx.createBufferSource();
-                    source.buffer = buffer;
-                    
-                    // Сглаживание для избежания щелчков
-                    const gainNode = this.playbackCtx.createGain();
-                    gainNode.gain.value = 1.0;
-                    
-                    source.connect(gainNode);
-                    gainNode.connect(this.playbackCtx.destination);
-                    source.start();
-                    
-                } catch (e) {
-                    console.error('Ошибка воспроизведения:', e);
-                }
-            },
-
-            startVolume(analyser) {
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            startVolume() {
+                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
                 const fill = document.getElementById('volumeFill');
                 
                 const update = () => {
                     if (!this.isConnected) return;
-                    analyser.getByteTimeDomainData(dataArray);
+                    this.analyser.getByteTimeDomainData(dataArray);
                     let max = 0;
                     for (let i = 0; i < dataArray.length; i++) {
                         const value = Math.abs(dataArray[i] - 128) / 128;
@@ -359,8 +341,13 @@
             },
 
             toggleMute() {
-                if (!this.isConnected) return;
+                if (!this.isConnected || !this.localStream) return;
                 this.isMuted = !this.isMuted;
+                
+                this.localStream.getAudioTracks().forEach(track => {
+                    track.enabled = !this.isMuted;
+                });
+                
                 this.socket.emit('toggle-mute');
                 this.updateMuteBtn();
                 document.getElementById('connectionStatus').textContent = 
@@ -402,29 +389,23 @@
             },
 
             leaveRoom() {
-                if (this.sendInterval) {
-                    clearInterval(this.sendInterval);
-                    this.sendInterval = null;
-                }
-                if (this.processor) {
-                    this.processor.disconnect();
-                    this.processor = null;
-                }
-                if (this.mediaStream) {
-                    this.mediaStream.getTracks().forEach(t => t.stop());
+                // Закрываем все WebRTC соединения
+                Object.keys(this.peerConnections).forEach(id => {
+                    this.closePeerConnection(id);
+                });
+                
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(t => t.stop());
                 }
                 if (this.audioContext) {
                     this.audioContext.close();
-                }
-                if (this.playbackCtx) {
-                    this.playbackCtx.close();
                 }
                 if (this.socket) {
                     this.socket.disconnect();
                 }
                 
                 this.isConnected = false;
-                this.audioBuffer = [];
+                this.peerConnections = {};
                 
                 document.getElementById('joinScreen').classList.remove('hidden');
                 document.getElementById('chatScreen').classList.add('hidden');
