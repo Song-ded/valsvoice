@@ -146,27 +146,27 @@
             socket: null,
             audioContext: null,
             mediaStream: null,
-            scriptProcessor: null,
+            processor: null,
             isMuted: false,
             isConnected: false,
-            playbackContext: null,
+            playbackCtx: null,
+            // Буфер для сбора аудиоданных
+            audioBuffer: [],
+            bufferSize: 4096,
+            sendInterval: null,
 
             init() {
-                this.socket = io({ transports: ['websocket', 'polling'] });
+                this.socket = io({ 
+                    transports: ['websocket', 'polling'],
+                    maxHttpBufferSize: 1e8
+                });
 
                 this.socket.on('connect', () => console.log('✅ Подключен'));
                 
                 this.socket.on('users-update', (users) => this.renderUsers(users));
-
-                this.socket.on('user-connected', (user) => {
-                    console.log('👤', user.name, 'присоединился');
-                });
-
-                this.socket.on('user-disconnected', (userId) => {
-                    console.log('👋', userId, 'отключился');
-                    this.renderUsers([]);
-                });
-
+                this.socket.on('user-connected', (user) => console.log('👤', user.name));
+                this.socket.on('user-disconnected', () => this.renderUsers([]));
+                
                 this.socket.on('user-mute-update', (data) => {
                     this.updateUserMute(data.userId, data.muted);
                 });
@@ -176,7 +176,6 @@
                     this.updateMuteBtn();
                 });
 
-                // Принимаем аудио как ArrayBuffer (передаётся через base64)
                 this.socket.on('audio-stream', (data) => {
                     this.playAudio(data.audio);
                 });
@@ -191,56 +190,75 @@
                     joinBtn.disabled = true;
                     joinBtn.textContent = 'Подключение...';
 
-                    // Получаем микрофон
+                    // Микрофон с высоким качеством
                     this.mediaStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                            sampleRate: 22050,
+                            noiseSuppression: false, // Выключаем встроенное шумоподавление
+                            autoGainControl: false,   // Выключаем AGC
+                            sampleRate: 48000,
                             channelCount: 1
                         }
                     });
 
-                    // Создаём AudioContext
+                    // AudioContext 48kHz для качества
                     this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                        sampleRate: 22050
+                        sampleRate: 48000
                     });
 
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
                     
-                    // Анализатор для громкости
-                    const analyser = this.audioContext.createAnalyser();
-                    analyser.fftSize = 256;
-                    source.connect(analyser);
+                    // Шумоподавление своими руками
+                    const highPass = this.audioContext.createBiquadFilter();
+                    highPass.type = 'highpass';
+                    highPass.frequency.value = 80; // Режем гул
                     
-                    // ScriptProcessor для захвата аудио (работает везде)
-                    this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
-                    source.connect(this.scriptProcessor);
-                    this.scriptProcessor.connect(this.audioContext.destination);
+                    const lowPass = this.audioContext.createBiquadFilter();
+                    lowPass.type = 'lowpass';
+                    lowPass.frequency.value = 8000; // Режем шум выше 8kHz
+                    
+                    const compressor = this.audioContext.createDynamicsCompressor();
+                    compressor.threshold.value = -30;
+                    compressor.knee.value = 20;
+                    compressor.ratio.value = 8;
+                    compressor.attack.value = 0.005;
+                    compressor.release.value = 0.1;
 
-                    // Отправляем аудио
-                    this.scriptProcessor.onaudioprocess = (e) => {
+                    // Анализатор
+                    const analyser = this.audioContext.createAnalyser();
+                    analyser.fftSize = 512;
+
+                    // ScriptProcessor с большим буфером для качества
+                    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    // Цепочка обработки
+                    source.connect(highPass);
+                    highPass.connect(lowPass);
+                    lowPass.connect(compressor);
+                    compressor.connect(analyser);
+                    compressor.connect(this.processor);
+                    this.processor.connect(this.audioContext.destination);
+
+                    // Собираем и отправляем аудио
+                    this.processor.onaudioprocess = (e) => {
                         if (!this.isMuted && this.isConnected) {
                             const input = e.inputBuffer.getChannelData(0);
-                            // Конвертируем Float32 в Int16
-                            const int16 = new Int16Array(input.length);
-                            for (let i = 0; i < input.length; i++) {
-                                const s = Math.max(-1, Math.min(1, input[i]));
-                                int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            this.audioBuffer.push(...Array.from(input));
+                            
+                            // Отправляем когда накопилось достаточно
+                            if (this.audioBuffer.length >= this.bufferSize) {
+                                this.sendAudioChunk();
                             }
-                            // В base64
-                            const uint8 = new Uint8Array(int16.buffer);
-                            let binary = '';
-                            for (let i = 0; i < uint8.length; i++) {
-                                binary += String.fromCharCode(uint8[i]);
-                            }
-                            const base64 = btoa(binary);
-                            this.socket.emit('audio-stream', base64);
                         }
                     };
 
-                    // Входим в комнату
+                    // Периодическая отправка остатков
+                    this.sendInterval = setInterval(() => {
+                        if (this.audioBuffer.length > 0 && !this.isMuted && this.isConnected) {
+                            this.sendAudioChunk();
+                        }
+                    }, 50);
+
                     this.socket.emit('join-room', { roomId, userName });
 
                     document.getElementById('joinScreen').classList.add('hidden');
@@ -259,9 +277,29 @@
                 }
             },
 
+            sendAudioChunk() {
+                // Берём кусок буфера
+                const chunk = this.audioBuffer.splice(0, this.bufferSize);
+                
+                // Float32 -> Int16
+                const int16 = new Int16Array(chunk.length);
+                for (let i = 0; i < chunk.length; i++) {
+                    const s = Math.max(-1, Math.min(1, chunk[i]));
+                    int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                
+                // В base64
+                const uint8 = new Uint8Array(int16.buffer);
+                let binary = '';
+                for (let i = 0; i < uint8.length; i++) {
+                    binary += String.fromCharCode(uint8[i]);
+                }
+                
+                this.socket.emit('audio-stream', btoa(binary));
+            },
+
             playAudio(base64Data) {
                 try {
-                    // Декодируем base64 в Int16Array
                     const binary = atob(base64Data);
                     const uint8 = new Uint8Array(binary.length);
                     for (let i = 0; i < binary.length; i++) {
@@ -269,27 +307,31 @@
                     }
                     
                     const int16 = new Int16Array(uint8.buffer);
-                    
-                    // Конвертируем в Float32
                     const float32 = new Float32Array(int16.length);
+                    
+                    // Плавное преобразование
                     for (let i = 0; i < int16.length; i++) {
                         float32[i] = int16[i] / 32768.0;
                     }
                     
-                    // Создаём контекст если нужно
-                    if (!this.playbackContext) {
-                        this.playbackContext = new (window.AudioContext || window.webkitAudioContext)({
-                            sampleRate: 22050
+                    if (!this.playbackCtx) {
+                        this.playbackCtx = new (window.AudioContext || window.webkitAudioContext)({
+                            sampleRate: 48000
                         });
                     }
                     
-                    // Создаём буфер и проигрываем
-                    const buffer = this.playbackContext.createBuffer(1, float32.length, 22050);
+                    const buffer = this.playbackCtx.createBuffer(1, float32.length, 48000);
                     buffer.getChannelData(0).set(float32);
                     
-                    const source = this.playbackContext.createBufferSource();
+                    const source = this.playbackCtx.createBufferSource();
                     source.buffer = buffer;
-                    source.connect(this.playbackContext.destination);
+                    
+                    // Сглаживание для избежания щелчков
+                    const gainNode = this.playbackCtx.createGain();
+                    gainNode.gain.value = 1.0;
+                    
+                    source.connect(gainNode);
+                    gainNode.connect(this.playbackCtx.destination);
                     source.start();
                     
                 } catch (e) {
@@ -303,10 +345,13 @@
                 
                 const update = () => {
                     if (!this.isConnected) return;
-                    analyser.getByteFrequencyData(dataArray);
-                    let sum = 0;
-                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-                    const vol = Math.min(100, Math.round((sum / dataArray.length / 255) * 100));
+                    analyser.getByteTimeDomainData(dataArray);
+                    let max = 0;
+                    for (let i = 0; i < dataArray.length; i++) {
+                        const value = Math.abs(dataArray[i] - 128) / 128;
+                        if (value > max) max = value;
+                    }
+                    const vol = Math.min(100, Math.round(max * 100));
                     if (fill) fill.style.width = vol + '%';
                     requestAnimationFrame(update);
                 };
@@ -357,9 +402,13 @@
             },
 
             leaveRoom() {
-                if (this.scriptProcessor) {
-                    this.scriptProcessor.disconnect();
-                    this.scriptProcessor = null;
+                if (this.sendInterval) {
+                    clearInterval(this.sendInterval);
+                    this.sendInterval = null;
+                }
+                if (this.processor) {
+                    this.processor.disconnect();
+                    this.processor = null;
                 }
                 if (this.mediaStream) {
                     this.mediaStream.getTracks().forEach(t => t.stop());
@@ -367,14 +416,16 @@
                 if (this.audioContext) {
                     this.audioContext.close();
                 }
-                if (this.playbackContext) {
-                    this.playbackContext.close();
+                if (this.playbackCtx) {
+                    this.playbackCtx.close();
                 }
                 if (this.socket) {
                     this.socket.disconnect();
                 }
                 
                 this.isConnected = false;
+                this.audioBuffer = [];
+                
                 document.getElementById('joinScreen').classList.remove('hidden');
                 document.getElementById('chatScreen').classList.add('hidden');
                 document.getElementById('joinBtn').disabled = false;
