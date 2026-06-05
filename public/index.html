@@ -192,6 +192,21 @@
             text-align: center;
             font-size: 0.9em;
         }
+
+        .speaking-indicator {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #ffeb3b;
+            border-radius: 50%;
+            margin-left: 5px;
+            animation: pulse 0.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
     </style>
 </head>
 <body>
@@ -243,20 +258,17 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        // Основной объект приложения
         window.chatApp = {
             socket: null,
-            mediaStream: null,
-            mediaRecorder: null,
             audioContext: null,
+            mediaStream: null,
+            processor: null,
             isMuted: false,
             isConnected: false,
             
-            // Очередь аудио для воспроизведения
-            audioQueue: [],
-            isPlaying: false,
-            currentAudio: null,
-
+            // Для воспроизведения
+            playbackContext: null,
+            
             init: function() {
                 this.socket = io({
                     transports: ['websocket', 'polling']
@@ -288,7 +300,7 @@
                 });
 
                 this.socket.on('audio-stream', (data) => {
-                    this.playAudio(data.audio);
+                    this.playAudioStream(data);
                 });
 
                 this.socket.on('disconnect', () => {
@@ -311,40 +323,43 @@
                             echoCancellation: true,
                             noiseSuppression: true,
                             autoGainControl: true,
-                            sampleRate: 48000,
+                            sampleRate: 44100,
                             channelCount: 1
                         }
                     });
 
                     console.log('🎤 Микрофон получен');
 
-                    // Создаем AudioContext для визуализации
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    // Создаем аудио контекст
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 44100
+                    });
+
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    
+                    // Создаем процессор для захвата сырых аудиоданных
+                    this.processor = this.audioContext.createScriptProcessor(4096, 1, 1);
+                    
+                    // Анализатор для визуализации
                     const analyser = this.audioContext.createAnalyser();
                     analyser.fftSize = 256;
-                    source.connect(analyser);
-
-                    // Создаем MediaRecorder для записи
-                    const options = {
-                        mimeType: 'audio/webm;codecs=opus',
-                        audioBitsPerSecond: 64000
-                    };
-
-                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
-                        options.mimeType = 'audio/webm';
-                    }
-
-                    this.mediaRecorder = new MediaRecorder(this.mediaStream, options);
                     
-                    this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0 && !this.isMuted && this.isConnected) {
-                            this.sendAudioData(event.data);
+                    // Подключаем: source -> processor и source -> analyser
+                    source.connect(this.processor);
+                    source.connect(analyser);
+                    this.processor.connect(this.audioContext.destination);
+
+                    // Обработка аудиоданных
+                    this.processor.onaudioprocess = (e) => {
+                        if (!this.isMuted && this.isConnected) {
+                            const inputData = e.inputBuffer.getChannelData(0);
+                            // Конвертируем Float32Array в Int16Array для экономии трафика
+                            const int16Data = this.float32ToInt16(inputData);
+                            // Отправляем как base64
+                            const base64 = this.arrayBufferToBase64(int16Data.buffer);
+                            this.socket.emit('audio-stream', base64);
                         }
                     };
-
-                    // Записываем и отправляем каждые 100мс
-                    this.mediaRecorder.start(100);
 
                     // Присоединяемся к комнате
                     this.socket.emit('join-room', { roomId, userName });
@@ -371,38 +386,62 @@
                 }
             },
 
-            sendAudioData: function(audioBlob) {
-                const reader = new FileReader();
-                reader.onloadend = () => {
-                    const base64data = reader.result.split(',')[1];
-                    if (base64data && this.socket.connected) {
-                        this.socket.emit('audio-stream', base64data);
-                    }
-                };
-                reader.readAsDataURL(audioBlob);
+            // Конвертация Float32 в Int16
+            float32ToInt16: function(float32Array) {
+                const int16Array = new Int16Array(float32Array.length);
+                for (let i = 0; i < float32Array.length; i++) {
+                    const s = Math.max(-1, Math.min(1, float32Array[i]));
+                    int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                }
+                return int16Array;
             },
 
-            playAudio: function(base64Audio) {
+            // Конвертация ArrayBuffer в base64
+            arrayBufferToBase64: function(buffer) {
+                let binary = '';
+                const bytes = new Uint8Array(buffer);
+                const len = bytes.byteLength;
+                for (let i = 0; i < len; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return window.btoa(binary);
+            },
+
+            // Воспроизведение входящего аудиопотока
+            playAudioStream: function(base64Data) {
                 try {
-                    // Конвертируем base64 в blob
-                    const binaryString = atob(base64Audio);
-                    const bytes = new Uint8Array(binaryString.length);
-                    for (let i = 0; i < binaryString.length; i++) {
+                    // Декодируем base64 в ArrayBuffer
+                    const binaryString = window.atob(base64Data);
+                    const len = binaryString.length;
+                    const bytes = new Uint8Array(len);
+                    for (let i = 0; i < len; i++) {
                         bytes[i] = binaryString.charCodeAt(i);
                     }
                     
-                    const audioBlob = new Blob([bytes], { type: 'audio/webm' });
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    const audio = new Audio(audioUrl);
+                    // Конвертируем в Int16Array
+                    const int16Array = new Int16Array(bytes.buffer);
                     
-                    audio.onended = () => {
-                        URL.revokeObjectURL(audioUrl);
-                    };
+                    // Конвертируем в Float32Array для Web Audio API
+                    const float32Array = new Float32Array(int16Array.length);
+                    for (let i = 0; i < int16Array.length; i++) {
+                        float32Array[i] = int16Array[i] / (int16Array[i] < 0 ? 0x8000 : 0x7FFF);
+                    }
                     
-                    audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
+                    // Создаем аудиобуфер и проигрываем
+                    if (!this.playbackContext) {
+                        this.playbackContext = new (window.AudioContext || window.webkitAudioContext)();
+                    }
+                    
+                    const audioBuffer = this.playbackContext.createBuffer(1, float32Array.length, 44100);
+                    audioBuffer.getChannelData(0).set(float32Array);
+                    
+                    const source = this.playbackContext.createBufferSource();
+                    source.buffer = audioBuffer;
+                    source.connect(this.playbackContext.destination);
+                    source.start();
                     
                 } catch (error) {
-                    console.error('Ошибка декодирования аудио:', error);
+                    console.error('Ошибка воспроизведения:', error);
                 }
             },
 
@@ -433,15 +472,9 @@
             },
 
             toggleMute: function() {
-                if (!this.isConnected || !this.mediaStream) return;
+                if (!this.isConnected) return;
                 
                 this.isMuted = !this.isMuted;
-                
-                // Отключаем аудио дорожку
-                this.mediaStream.getAudioTracks().forEach(track => {
-                    track.enabled = !this.isMuted;
-                });
-                
                 this.socket.emit('toggle-mute');
                 this.updateMuteButton();
                 
@@ -480,21 +513,20 @@
                 const usersList = document.getElementById('usersList');
                 const userItems = usersList.querySelectorAll('.user-item');
                 userItems.forEach(item => {
-                    if (item.textContent.includes(userId)) {
-                        const dot = item.querySelector('.status-dot');
-                        if (muted) {
-                            dot.classList.add('status-muted');
-                        } else {
-                            dot.classList.remove('status-muted');
-                        }
+                    const dot = item.querySelector('.status-dot');
+                    if (muted) {
+                        dot.classList.add('status-muted');
+                    } else {
+                        dot.classList.remove('status-muted');
                     }
                 });
             },
 
             leaveRoom: function() {
-                // Останавливаем запись
-                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-                    this.mediaRecorder.stop();
+                // Отключаем процессор
+                if (this.processor) {
+                    this.processor.disconnect();
+                    this.processor = null;
                 }
                 
                 // Останавливаем медиа поток
@@ -502,9 +534,12 @@
                     this.mediaStream.getTracks().forEach(track => track.stop());
                 }
                 
-                // Закрываем аудио контекст
+                // Закрываем аудио контексты
                 if (this.audioContext) {
                     this.audioContext.close();
+                }
+                if (this.playbackContext) {
+                    this.playbackContext.close();
                 }
                 
                 // Отключаем сокет
