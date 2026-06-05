@@ -5,14 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Голосовой чат</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
@@ -20,177 +15,83 @@
             align-items: center;
             color: white;
         }
-
         .container {
-            background: rgba(255, 255, 255, 0.1);
+            background: rgba(255,255,255,0.1);
             backdrop-filter: blur(20px);
             border-radius: 30px;
             padding: 40px;
             width: 90%;
             max-width: 500px;
             box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            border: 1px solid rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255,255,255,0.2);
         }
-
-        h1 {
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 2.5em;
-            font-weight: 300;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .input-group {
-            margin-bottom: 20px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 500;
-            font-size: 0.9em;
-            opacity: 0.9;
-        }
-
+        h1 { text-align: center; margin-bottom: 30px; font-size: 2.5em; font-weight: 300; }
+        .hidden { display: none !important; }
+        .input-group { margin-bottom: 20px; }
+        label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9em; opacity: 0.9; }
         input {
-            width: 100%;
-            padding: 15px;
+            width: 100%; padding: 15px;
             border: 2px solid rgba(255,255,255,0.2);
             border-radius: 15px;
             background: rgba(255,255,255,0.1);
-            color: white;
-            font-size: 1em;
-            outline: none;
+            color: white; font-size: 1em; outline: none;
         }
-
-        input:focus {
-            border-color: white;
-            background: rgba(255,255,255,0.2);
-        }
-
-        input::placeholder {
-            color: rgba(255,255,255,0.5);
-        }
-
+        input:focus { border-color: white; background: rgba(255,255,255,0.2); }
+        input::placeholder { color: rgba(255,255,255,0.5); }
         .btn {
-            width: 100%;
-            padding: 15px;
-            border: none;
-            border-radius: 15px;
-            font-size: 1.1em;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-transform: uppercase;
+            width: 100%; padding: 15px; border: none;
+            border-radius: 15px; font-size: 1.1em;
+            font-weight: 600; cursor: pointer;
+            transition: all 0.3s; text-transform: uppercase;
             letter-spacing: 1px;
         }
-
-        .btn-primary {
-            background: white;
-            color: #667eea;
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-        }
-
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .controls {
-            display: flex;
-            gap: 15px;
-            margin-top: 20px;
-        }
-
+        .btn-primary { background: white; color: #667eea; }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+        .controls { display: flex; gap: 15px; margin-top: 20px; }
         .btn-control {
-            flex: 1;
-            padding: 12px;
+            flex: 1; padding: 12px;
             border: 2px solid rgba(255,255,255,0.3);
             border-radius: 15px;
             background: rgba(255,255,255,0.1);
-            color: white;
-            cursor: pointer;
-            transition: all 0.3s;
-            font-weight: 500;
+            color: white; cursor: pointer;
+            transition: all 0.3s; font-weight: 500;
             text-align: center;
         }
-
-        .btn-control:hover {
-            background: rgba(255,255,255,0.2);
-        }
-
-        .btn-muted {
-            background: rgba(255, 0, 0, 0.5) !important;
-            border-color: rgba(255, 0, 0, 0.5) !important;
-        }
-
-        .users-list {
-            margin-top: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-
+        .btn-control:hover { background: rgba(255,255,255,0.2); }
+        .btn-muted { background: rgba(255,0,0,0.5) !important; border-color: rgba(255,0,0,0.5) !important; }
+        .users-list { margin-top: 20px; max-height: 300px; overflow-y: auto; }
         .user-item {
-            padding: 10px 15px;
-            margin: 5px 0;
+            padding: 10px 15px; margin: 5px 0;
             background: rgba(255,255,255,0.1);
             border-radius: 10px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
+            display: flex; align-items: center; gap: 10px;
         }
-
         .status-dot {
-            width: 12px;
-            height: 12px;
+            width: 12px; height: 12px;
             border-radius: 50%;
-            background: #4CAF50;
-            flex-shrink: 0;
+            background: #4CAF50; flex-shrink: 0;
         }
-
-        .status-muted {
-            background: #f44336;
-        }
-
+        .status-muted { background: #f44336; }
         .volume-bar {
-            margin: 15px 0;
-            padding: 10px;
+            margin: 15px 0; padding: 10px;
             background: rgba(0,0,0,0.2);
-            border-radius: 10px;
-            text-align: center;
+            border-radius: 10px; text-align: center;
         }
-
         .volume-fill {
-            height: 5px;
-            background: #4CAF50;
-            border-radius: 3px;
-            transition: width 0.1s;
-            margin-top: 5px;
-            width: 0%;
+            height: 5px; background: #4CAF50;
+            border-radius: 3px; transition: width 0.1s;
+            margin-top: 5px; width: 0%;
         }
-
         .status-text {
-            margin-top: 10px;
-            padding: 8px;
+            margin-top: 10px; padding: 8px;
             background: rgba(0,0,0,0.2);
-            border-radius: 8px;
-            font-size: 0.9em;
+            border-radius: 8px; font-size: 0.9em;
             text-align: center;
         }
-
         .error-message {
-            color: #ff6b6b;
-            margin-top: 10px;
-            text-align: center;
-            font-size: 0.9em;
+            color: #ff6b6b; margin-top: 10px;
+            text-align: center; font-size: 0.9em;
         }
     </style>
 </head>
@@ -206,7 +107,7 @@
                 <label>ID комнаты:</label>
                 <input type="text" id="roomId" placeholder="Введите ID комнаты" value="general">
             </div>
-            <button id="joinBtn" class="btn btn-primary" onclick="window.chatApp.joinRoom()">
+            <button id="joinBtn" class="btn btn-primary" onclick="chatApp.joinRoom()">
                 Присоединиться
             </button>
             <div id="errorMessage" class="error-message"></div>
@@ -225,10 +126,10 @@
             </div>
 
             <div class="controls">
-                <button id="muteBtn" class="btn-control" onclick="window.chatApp.toggleMute()">
+                <button id="muteBtn" class="btn-control" onclick="chatApp.toggleMute()">
                     🔊 Микрофон
                 </button>
-                <button class="btn-control" onclick="window.chatApp.leaveRoom()">
+                <button class="btn-control" onclick="chatApp.leaveRoom()">
                     🚪 Выйти
                 </button>
             </div>
@@ -241,57 +142,47 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        window.chatApp = {
+        const chatApp = {
             socket: null,
-            audioContext: null,
             mediaStream: null,
-            audioWorkletNode: null,
+            mediaRecorder: null,
+            audioContext: null,
             isMuted: false,
             isConnected: false,
-            playbackContext: null,
-            analyser: null,
-            volumeInterval: null,
+            remoteAudio: null,
 
-            init: function() {
-                this.socket = io({
-                    transports: ['websocket', 'polling']
-                });
+            init() {
+                this.socket = io({ transports: ['websocket', 'polling'] });
 
-                this.socket.on('connect', () => {
-                    console.log('✅ Подключен к серверу');
-                });
-
+                this.socket.on('connect', () => console.log('✅ Подключен'));
+                
                 this.socket.on('users-update', (users) => {
-                    this.updateUsersList(users);
+                    this.renderUsers(users);
                 });
 
                 this.socket.on('user-connected', (user) => {
-                    console.log('👤 Присоединился:', user.name);
+                    console.log('👤', user.name, 'присоединился');
                 });
 
                 this.socket.on('user-disconnected', (userId) => {
-                    console.log('👋 Отключился:', userId);
+                    console.log('👋', userId, 'отключился');
                 });
 
                 this.socket.on('user-mute-update', (data) => {
-                    this.updateUserMuteStatus(data.userId, data.muted);
+                    this.updateUserMute(data.userId, data.muted);
                 });
 
                 this.socket.on('mute-status', (muted) => {
                     this.isMuted = muted;
-                    this.updateMuteButton();
+                    this.updateMuteBtn();
                 });
 
                 this.socket.on('audio-stream', (data) => {
-                    this.playAudioStream(data.audio);
-                });
-
-                this.socket.on('disconnect', () => {
-                    console.log('❌ Отключен от сервера');
+                    this.playRemoteAudio(data.audio);
                 });
             },
 
-            joinRoom: async function() {
+            async joinRoom() {
                 const userName = document.getElementById('userName').value.trim() || 'User';
                 const roomId = document.getElementById('roomId').value.trim() || 'general';
                 const joinBtn = document.getElementById('joinBtn');
@@ -300,245 +191,174 @@
                     joinBtn.disabled = true;
                     joinBtn.textContent = 'Подключение...';
 
-                    // Получаем доступ к микрофону
+                    // Получаем микрофон
                     this.mediaStream = await navigator.mediaDevices.getUserMedia({
                         audio: {
                             echoCancellation: true,
                             noiseSuppression: true,
-                            autoGainControl: true,
-                            sampleRate: 44100,
-                            channelCount: 1
+                            autoGainControl: true
                         }
                     });
 
-                    console.log('🎤 Микрофон получен');
+                    // Аудиоконтекст для громкости
+                    this.audioContext = new AudioContext();
+                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    const analyser = this.audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+                    source.connect(analyser);
 
-                    // Создаем аудио контекст
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                        sampleRate: 44100
+                    // MediaRecorder для записи
+                    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
+                        ? 'audio/webm;codecs=opus' 
+                        : 'audio/webm';
+
+                    this.mediaRecorder = new MediaRecorder(this.mediaStream, {
+                        mimeType: mimeType,
+                        audioBitsPerSecond: 64000
                     });
 
-                    // Загружаем AudioWorklet
-                    await this.audioContext.audioWorklet.addModule('/audio-processor.js');
-
-                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
-                    
-                    // Создаем AudioWorkletNode
-                    this.audioWorkletNode = new AudioWorkletNode(this.audioContext, 'audio-processor');
-                    
-                    // Анализатор для визуализации
-                    this.analyser = this.audioContext.createAnalyser();
-                    this.analyser.fftSize = 256;
-                    
-                    // Подключаем: source -> worklet и source -> analyser
-                    source.connect(this.audioWorkletNode);
-                    source.connect(this.analyser);
-                    this.audioWorkletNode.connect(this.audioContext.destination);
-
-                    // Получаем аудиоданные от worklet
-                    this.audioWorkletNode.port.onmessage = (event) => {
-                        if (!this.isMuted && this.isConnected && event.data.audio) {
-                            const base64 = this.arrayBufferToBase64(event.data.audio);
-                            this.socket.emit('audio-stream', base64);
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && !this.isMuted && this.isConnected) {
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                                const base64 = reader.result.split(',')[1];
+                                if (base64 && this.socket.connected) {
+                                    this.socket.emit('audio-stream', base64);
+                                }
+                            };
+                            reader.readAsDataURL(event.data);
                         }
                     };
 
-                    // Присоединяемся к комнате
+                    // Запускаем запись чанками по 250мс
+                    this.mediaRecorder.start(250);
+
+                    // Входим в комнату
                     this.socket.emit('join-room', { roomId, userName });
 
-                    // Переключаем экраны
                     document.getElementById('joinScreen').classList.add('hidden');
                     document.getElementById('chatScreen').classList.remove('hidden');
                     document.getElementById('currentRoom').textContent = roomId;
                     document.getElementById('connectionStatus').textContent = '🟢 Онлайн';
                     
                     this.isConnected = true;
-
-                    // Запускаем мониторинг громкости
-                    this.startVolumeMeter();
-
-                    console.log('✅ Вошли в комнату:', roomId);
+                    this.startVolume(analyser);
 
                 } catch (error) {
-                    console.error('❌ Ошибка:', error);
-                    document.getElementById('errorMessage').textContent = 
-                        'Ошибка: ' + error.message;
+                    console.error('Ошибка:', error);
+                    document.getElementById('errorMessage').textContent = 'Ошибка: ' + error.message;
                     joinBtn.disabled = false;
                     joinBtn.textContent = 'Присоединиться';
                 }
             },
 
-            arrayBufferToBase64: function(buffer) {
-                const bytes = new Uint8Array(buffer);
-                let binary = '';
-                for (let i = 0; i < bytes.byteLength; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                return btoa(binary);
-            },
-
-            base64ToArrayBuffer: function(base64) {
-                const binaryString = atob(base64);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                return bytes.buffer;
-            },
-
-            playAudioStream: function(base64Data) {
+            playRemoteAudio(base64Data) {
                 try {
-                    // Декодируем base64
-                    const buffer = this.base64ToArrayBuffer(base64Data);
-                    const int16Array = new Int16Array(buffer);
-                    
-                    // Конвертируем в Float32
-                    const float32Array = new Float32Array(int16Array.length);
-                    for (let i = 0; i < int16Array.length; i++) {
-                        float32Array[i] = int16Array[i] / 32768.0;
+                    // Создаём Blob из base64
+                    const binaryStr = atob(base64Data);
+                    const bytes = new Uint8Array(binaryStr.length);
+                    for (let i = 0; i < binaryStr.length; i++) {
+                        bytes[i] = binaryStr.charCodeAt(i);
                     }
                     
-                    // Создаем контекст для воспроизведения если нужно
-                    if (!this.playbackContext) {
-                        this.playbackContext = new (window.AudioContext || window.webkitAudioContext)();
-                    }
+                    const blob = new Blob([bytes], { type: 'audio/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const audio = new Audio(url);
                     
-                    // Создаем аудиобуфер и проигрываем
-                    const audioBuffer = this.playbackContext.createBuffer(1, float32Array.length, 44100);
-                    audioBuffer.getChannelData(0).set(float32Array);
+                    audio.onended = () => URL.revokeObjectURL(url);
+                    audio.onerror = () => URL.revokeObjectURL(url);
                     
-                    const source = this.playbackContext.createBufferSource();
-                    source.buffer = audioBuffer;
-                    source.connect(this.playbackContext.destination);
-                    source.start();
-                    
-                } catch (error) {
-                    console.error('Ошибка воспроизведения:', error);
+                    audio.play().catch(e => console.log('Play error:', e));
+                } catch (e) {
+                    console.error('Audio error:', e);
                 }
             },
 
-            startVolumeMeter: function() {
-                const self = this;
-                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+            startVolume(analyser) {
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                const fill = document.getElementById('volumeFill');
                 
-                const updateMeter = () => {
-                    if (!self.isConnected || !self.analyser) return;
-                    
-                    self.analyser.getByteFrequencyData(dataArray);
+                const update = () => {
+                    if (!this.isConnected) return;
+                    analyser.getByteFrequencyData(dataArray);
                     let sum = 0;
-                    for (let i = 0; i < dataArray.length; i++) {
-                        sum += dataArray[i];
-                    }
-                    const average = sum / dataArray.length;
-                    const volume = Math.min(100, Math.round((average / 255) * 100));
-                    
-                    const volumeFill = document.getElementById('volumeFill');
-                    if (volumeFill) {
-                        volumeFill.style.width = volume + '%';
-                    }
-                    
-                    requestAnimationFrame(updateMeter);
+                    for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                    const vol = Math.min(100, Math.round((sum / dataArray.length / 255) * 100));
+                    if (fill) fill.style.width = vol + '%';
+                    requestAnimationFrame(update);
                 };
-                
-                updateMeter();
+                update();
             },
 
-            toggleMute: function() {
+            toggleMute() {
                 if (!this.isConnected) return;
-                
                 this.isMuted = !this.isMuted;
                 this.socket.emit('toggle-mute');
-                this.updateMuteButton();
-                
+                this.updateMuteBtn();
                 document.getElementById('connectionStatus').textContent = 
                     this.isMuted ? '🔇 Микрофон выключен' : '🟢 Онлайн';
             },
 
-            updateMuteButton: function() {
-                const muteBtn = document.getElementById('muteBtn');
+            updateMuteBtn() {
+                const btn = document.getElementById('muteBtn');
                 if (this.isMuted) {
-                    muteBtn.textContent = '🔇 Включить микрофон';
-                    muteBtn.classList.add('btn-muted');
+                    btn.textContent = '🔇 Включить микрофон';
+                    btn.classList.add('btn-muted');
                 } else {
-                    muteBtn.textContent = '🔊 Выключить микрофон';
-                    muteBtn.classList.remove('btn-muted');
+                    btn.textContent = '🔊 Выключить микрофон';
+                    btn.classList.remove('btn-muted');
                 }
             },
 
-            updateUsersList: function(users) {
-                const usersList = document.getElementById('usersList');
-                usersList.innerHTML = '<h3>👥 Участники:</h3>';
-                
-                users.forEach(user => {
-                    const userElement = document.createElement('div');
-                    userElement.className = 'user-item';
-                    userElement.innerHTML = `
-                        <div class="status-dot ${user.muted ? 'status-muted' : ''}"></div>
-                        <span>${user.name} ${user.id === this.socket.id ? '(вы)' : ''}</span>
-                        ${user.muted ? '<span>🔇</span>' : ''}
+            renderUsers(users) {
+                const list = document.getElementById('usersList');
+                list.innerHTML = '<h3>👥 Участники:</h3>';
+                users.forEach(u => {
+                    const div = document.createElement('div');
+                    div.className = 'user-item';
+                    div.innerHTML = `
+                        <div class="status-dot ${u.muted ? 'status-muted' : ''}"></div>
+                        <span>${u.name} ${u.id === this.socket?.id ? '(вы)' : ''}</span>
+                        ${u.muted ? '<span>🔇</span>' : ''}
                     `;
-                    usersList.appendChild(userElement);
+                    list.appendChild(div);
                 });
             },
 
-            updateUserMuteStatus: function(userId, muted) {
-                const usersList = document.getElementById('usersList');
-                const dots = usersList.querySelectorAll('.status-dot');
-                dots.forEach(dot => {
-                    if (muted) {
-                        dot.classList.add('status-muted');
-                    } else {
-                        dot.classList.remove('status-muted');
-                    }
+            updateUserMute(userId, muted) {
+                document.querySelectorAll('.user-item').forEach(el => {
+                    const dot = el.querySelector('.status-dot');
+                    if (muted) dot?.classList.add('status-muted');
+                    else dot?.classList.remove('status-muted');
                 });
             },
 
-            leaveRoom: function() {
-                if (this.audioWorkletNode) {
-                    this.audioWorkletNode.disconnect();
-                    this.audioWorkletNode = null;
+            leaveRoom() {
+                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                    this.mediaRecorder.stop();
                 }
-                
                 if (this.mediaStream) {
-                    this.mediaStream.getTracks().forEach(track => track.stop());
+                    this.mediaStream.getTracks().forEach(t => t.stop());
                 }
-                
                 if (this.audioContext) {
                     this.audioContext.close();
                 }
-                if (this.playbackContext) {
-                    this.playbackContext.close();
-                }
-                
                 if (this.socket) {
                     this.socket.disconnect();
                 }
                 
                 this.isConnected = false;
-                this.analyser = null;
-                
                 document.getElementById('joinScreen').classList.remove('hidden');
                 document.getElementById('chatScreen').classList.add('hidden');
-                
-                const joinBtn = document.getElementById('joinBtn');
-                joinBtn.disabled = false;
-                joinBtn.textContent = 'Присоединиться';
+                document.getElementById('joinBtn').disabled = false;
+                document.getElementById('joinBtn').textContent = 'Присоединиться';
                 
                 this.init();
-                
-                console.log('👋 Вышли из комнаты');
             }
         };
 
-        window.onload = () => {
-            window.chatApp.init();
-        };
-
-        window.onbeforeunload = () => {
-            if (window.chatApp.isConnected) {
-                window.chatApp.leaveRoom();
-            }
-        };
+        window.onload = () => chatApp.init();
+        window.onbeforeunload = () => { if (chatApp.isConnected) chatApp.leaveRoom(); };
     </script>
 </body>
 </html>
