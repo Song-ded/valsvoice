@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Голосовой чат WebRTC</title>
+    <title>Голосовой чат</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -35,7 +35,6 @@
             color: white; font-size: 1em; outline: none;
         }
         input:focus { border-color: white; background: rgba(255,255,255,0.2); }
-        input::placeholder { color: rgba(255,255,255,0.5); }
         .btn {
             width: 100%; padding: 15px; border: none;
             border-radius: 15px; font-size: 1.1em;
@@ -55,7 +54,7 @@
             font-weight: 500; text-align: center;
         }
         .btn-control:hover { background: rgba(255,255,255,0.2); }
-        .btn-muted { background: rgba(255,0,0,0.5) !important; border-color: rgba(255,0,0,0.5) !important; }
+        .btn-muted { background: rgba(255,0,0,0.5) !important; }
         .users-list { margin-top: 20px; max-height: 300px; overflow-y: auto; }
         .user-item {
             padding: 10px 15px; margin: 5px 0;
@@ -66,7 +65,7 @@
         .status-dot {
             width: 12px; height: 12px;
             border-radius: 50%;
-            background: #4CAF50; flex-shrink: 0;
+            background: #4CAF50;
         }
         .status-muted { background: #f44336; }
         .volume-bar {
@@ -77,7 +76,7 @@
         .volume-fill {
             height: 5px; background: #4CAF50;
             border-radius: 3px; width: 0%;
-            margin-top: 5px; transition: width 0.05s;
+            margin-top: 5px; transition: width 0.1s;
         }
         .status-text {
             margin: 10px 0; padding: 8px;
@@ -142,77 +141,49 @@
             socket: null,
             localStream: null,
             peerConnections: {},
-            remoteAudioElements: {},
             isMuted: false,
             isConnected: false,
             audioContext: null,
-            analyser: null,
-
-            configuration: {
-                iceServers: [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ],
-                iceTransportPolicy: 'all',
-                bundlePolicy: 'max-bundle',
-                rtcpMuxPolicy: 'require'
-            },
 
             init() {
-                this.socket = io({ 
-                    transports: ['websocket', 'polling'],
-                    upgrade: true
-                });
+                this.socket = io();
 
-                this.socket.on('connect', () => console.log('✅ Подключен'));
-                
                 this.socket.on('users-update', (users) => this.renderUsers(users));
 
                 this.socket.on('user-joined', (user) => {
-                    console.log('👤', user.name, 'присоединился');
-                    // Небольшая задержка перед созданием соединения
-                    setTimeout(() => {
-                        this.createPeerConnection(user.id, true);
-                    }, 500);
+                    console.log('👤 Зашёл:', user.name);
+                    this.createPeerConnection(user.id, true);
                 });
 
                 this.socket.on('user-left', (userId) => {
-                    this.closePeerConnection(userId);
-                });
-
-                this.socket.on('offer', async ({ offer, from, name }) => {
-                    console.log('📞 Offer от', name);
-                    const pc = this.createPeerConnection(from, false);
-                    try {
-                        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-                        const answer = await pc.createAnswer();
-                        await pc.setLocalDescription(answer);
-                        this.socket.emit('answer', { answer, to: from });
-                    } catch (e) {
-                        console.error('Ошибка обработки offer:', e);
+                    console.log('👋 Вышел:', userId);
+                    if (this.peerConnections[userId]) {
+                        this.peerConnections[userId].close();
+                        delete this.peerConnections[userId];
                     }
                 });
 
+                this.socket.on('offer', async ({ offer, from }) => {
+                    console.log('📞 Входящий звонок');
+                    const pc = this.createPeerConnection(from, false);
+                    await pc.setRemoteDescription(offer);
+                    const answer = await pc.createAnswer();
+                    await pc.setLocalDescription(answer);
+                    this.socket.emit('answer', { answer, to: from });
+                });
+
                 this.socket.on('answer', async ({ answer, from }) => {
-                    console.log('✅ Answer от', from);
+                    console.log('✅ Ответ получен');
                     const pc = this.peerConnections[from];
-                    if (pc && pc.signalingState === 'have-local-offer') {
-                        try {
-                            await pc.setRemoteDescription(new RTCSessionDescription(answer));
-                        } catch (e) {
-                            console.error('Ошибка установки answer:', e);
-                        }
+                    if (pc) {
+                        await pc.setRemoteDescription(answer);
                     }
                 });
 
                 this.socket.on('ice-candidate', async ({ candidate, from }) => {
                     const pc = this.peerConnections[from];
-                    if (pc && pc.remoteDescription && candidate) {
-                        try {
-                            await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                        } catch (e) {
-                            console.error('Ошибка ICE:', e);
-                        }
+                    if (pc && candidate) {
+                        await pc.addIceCandidate(candidate);
                     }
                 });
 
@@ -227,71 +198,27 @@
             },
 
             createPeerConnection(userId, isInitiator) {
-                if (this.peerConnections[userId]) {
-                    return this.peerConnections[userId];
-                }
+                if (this.peerConnections[userId]) return;
 
-                const pc = new RTCPeerConnection(this.configuration);
+                const pc = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+
                 this.peerConnections[userId] = pc;
 
-                // Настройка качества аудио
+                // Добавляем локальный стрим
                 if (this.localStream) {
                     this.localStream.getTracks().forEach(track => {
-                        const sender = pc.addTrack(track, this.localStream);
-                        // Оптимизация параметров отправки
-                        const params = sender.getParameters();
-                        if (!params.encodings) {
-                            params.encodings = [{}];
-                        }
-                        params.encodings[0].maxBitrate = 128000; // 128 kbps для голоса
-                        params.encodings[0].priority = 'high';
-                        params.encodings[0].networkPriority = 'high';
-                        sender.setParameters(params).catch(e => console.log('Параметры:', e));
+                        pc.addTrack(track, this.localStream);
                     });
                 }
 
-                // Обработка удалённого аудио
+                // Получаем удалённый стрим
                 pc.ontrack = (event) => {
-                    console.log('📡 Аудио от', userId);
-                    
-                    // Удаляем старый аудио элемент если есть
-                    if (this.remoteAudioElements[userId]) {
-                        this.remoteAudioElements[userId].srcObject = null;
-                        this.remoteAudioElements[userId].remove();
-                    }
-                    
-                    // Создаём новый аудио элемент с оптимизациями
+                    console.log('📡 Получен аудио поток');
                     const audio = new Audio();
                     audio.srcObject = event.streams[0];
-                    audio.autoplay = true;
-                    
-                    // Критичные настройки для избежания "заглатывания"
-                    audio.preload = 'auto';
-                    audio.volume = 1.0;
-                    
-                    // Обработка окончания воспроизведения
-                    audio.onplay = () => {
-                        console.log('▶️ Воспроизведение начато для', userId);
-                    };
-                    
-                    audio.onended = () => {
-                        console.log('⏹️ Воспроизведение закончено для', userId);
-                    };
-                    
-                    audio.onerror = (e) => {
-                        console.error('Ошибка аудио для', userId, ':', e);
-                    };
-                    
-                    // Запускаем воспроизведение
-                    audio.play().then(() => {
-                        console.log('✅ Аудио играет для', userId);
-                    }).catch(e => {
-                        console.log('Play error:', e);
-                        // Повторная попытка при ошибке
-                        setTimeout(() => audio.play().catch(() => {}), 100);
-                    });
-                    
-                    this.remoteAudioElements[userId] = audio;
+                    audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
                 };
 
                 // ICE кандидаты
@@ -304,68 +231,18 @@
                     }
                 };
 
-                // Мониторинг состояния
-                pc.onconnectionstatechange = () => {
-                    const state = pc.connectionState;
-                    console.log(`🔗 ${userId}: ${state}`);
-                    
-                    if (state === 'connected') {
-                        document.getElementById('connectionStatus').textContent = '🟢 Онлайн';
-                    } else if (state === 'disconnected' || state === 'failed') {
-                        console.log('Переподключение...');
-                        this.closePeerConnection(userId);
-                        // Пересоздаём соединение
-                        setTimeout(() => {
-                            if (this.isConnected) {
-                                this.createPeerConnection(userId, true);
-                            }
-                        }, 1000);
-                    }
-                };
-
-                pc.oniceconnectionstatechange = () => {
-                    console.log(`🧊 ICE ${userId}: ${pc.iceConnectionState}`);
-                };
-
-                // Создаём offer если мы инициатор
+                // Создаём offer если нужно
                 if (isInitiator) {
-                    this.createOffer(pc, userId);
-                }
-
-                return pc;
-            },
-
-            async createOffer(pc, userId) {
-                try {
-                    const offer = await pc.createOffer({
-                        offerToReceiveAudio: true,
-                        offerToReceiveVideo: false,
-                        voiceActivityDetection: false // Отключаем VAD чтобы не обрезало конец фраз
-                    });
-                    await pc.setLocalDescription(offer);
-                    this.socket.emit('offer', { offer, to: userId });
-                } catch (e) {
-                    console.error('Ошибка offer:', e);
-                }
-            },
-
-            closePeerConnection(userId) {
-                const pc = this.peerConnections[userId];
-                if (pc) {
-                    pc.ontrack = null;
-                    pc.onicecandidate = null;
-                    pc.onconnectionstatechange = null;
-                    pc.close();
-                    delete this.peerConnections[userId];
-                }
-                
-                // Удаляем аудио элемент
-                if (this.remoteAudioElements[userId]) {
-                    const audio = this.remoteAudioElements[userId];
-                    audio.srcObject = null;
-                    audio.pause();
-                    audio.remove();
-                    delete this.remoteAudioElements[userId];
+                    pc.createOffer({
+                        offerToReceiveAudio: true
+                    }).then(offer => {
+                        return pc.setLocalDescription(offer);
+                    }).then(() => {
+                        this.socket.emit('offer', {
+                            offer: pc.localDescription,
+                            to: userId
+                        });
+                    }).catch(e => console.error('Ошибка offer:', e));
                 }
             },
 
@@ -378,30 +255,17 @@
                     joinBtn.disabled = true;
                     joinBtn.textContent = 'Подключение...';
 
-                    // Микрофон с правильными настройками
+                    // Получаем микрофон
                     this.localStream = await navigator.mediaDevices.getUserMedia({
-                        audio: {
-                            echoCancellation: true,
-                            noiseSuppression: true,
-                            autoGainControl: true,
-                            channelCount: 1,
-                            sampleRate: 48000,
-                            // Отключаем автоматическую регулировку громкости
-                            volume: 1.0
-                        }
+                        audio: true
                     });
 
-                    // AudioContext для визуализации
-                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
-                        sampleRate: 48000,
-                        latencyHint: 'interactive'
-                    });
-                    
+                    // Для визуализации
+                    this.audioContext = new AudioContext();
                     const source = this.audioContext.createMediaStreamSource(this.localStream);
-                    this.analyser = this.audioContext.createAnalyser();
-                    this.analyser.fftSize = 512;
-                    this.analyser.smoothingTimeConstant = 0.3;
-                    source.connect(this.analyser);
+                    const analyser = this.audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+                    source.connect(analyser);
 
                     // Входим в комнату
                     this.socket.emit('join-room', { roomId, userName });
@@ -409,55 +273,44 @@
                     document.getElementById('joinScreen').classList.add('hidden');
                     document.getElementById('chatScreen').classList.remove('hidden');
                     document.getElementById('currentRoom').textContent = roomId;
-                    document.getElementById('connectionStatus').textContent = '🟡 Подключение...';
+                    document.getElementById('connectionStatus').textContent = '🟢 Онлайн';
                     
                     this.isConnected = true;
-                    this.startVolume();
+                    this.startVolume(analyser);
 
                 } catch (error) {
-                    console.error('Ошибка:', error);
                     document.getElementById('errorMessage').textContent = 'Ошибка: ' + error.message;
                     joinBtn.disabled = false;
                     joinBtn.textContent = 'Присоединиться';
                 }
             },
 
-            startVolume() {
-                if (!this.analyser) return;
-                
-                const dataArray = new Uint8Array(this.analyser.frequencyBinCount);
+            startVolume(analyser) {
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
                 const fill = document.getElementById('volumeFill');
                 
                 const update = () => {
-                    if (!this.isConnected || !this.analyser) return;
-                    
-                    this.analyser.getByteTimeDomainData(dataArray);
-                    let rms = 0;
+                    if (!this.isConnected) return;
+                    analyser.getByteTimeDomainData(dataArray);
+                    let max = 0;
                     for (let i = 0; i < dataArray.length; i++) {
-                        const value = (dataArray[i] - 128) / 128;
-                        rms += value * value;
+                        const value = Math.abs(dataArray[i] - 128) / 128;
+                        if (value > max) max = value;
                     }
-                    rms = Math.sqrt(rms / dataArray.length);
-                    const vol = Math.min(100, Math.round(rms * 200));
-                    
-                    if (fill) fill.style.width = vol + '%';
+                    fill.style.width = Math.min(100, max * 100) + '%';
                     requestAnimationFrame(update);
                 };
                 update();
             },
 
             toggleMute() {
-                if (!this.isConnected || !this.localStream) return;
-                
+                if (!this.localStream) return;
                 this.isMuted = !this.isMuted;
                 this.localStream.getAudioTracks().forEach(track => {
                     track.enabled = !this.isMuted;
                 });
-                
                 this.socket.emit('toggle-mute');
                 this.updateMuteBtn();
-                document.getElementById('connectionStatus').textContent = 
-                    this.isMuted ? '🔇 Микрофон выключен' : '🟢 Онлайн';
             },
 
             updateMuteBtn() {
@@ -495,9 +348,8 @@
             },
 
             leaveRoom() {
-                Object.keys(this.peerConnections).forEach(id => {
-                    this.closePeerConnection(id);
-                });
+                Object.values(this.peerConnections).forEach(pc => pc.close());
+                this.peerConnections = {};
                 
                 if (this.localStream) {
                     this.localStream.getTracks().forEach(t => t.stop());
@@ -505,13 +357,9 @@
                 if (this.audioContext) {
                     this.audioContext.close();
                 }
-                if (this.socket) {
-                    this.socket.disconnect();
-                }
+                this.socket.disconnect();
                 
                 this.isConnected = false;
-                this.peerConnections = {};
-                this.remoteAudioElements = {};
                 
                 document.getElementById('joinScreen').classList.remove('hidden');
                 document.getElementById('chatScreen').classList.add('hidden');
@@ -523,7 +371,6 @@
         };
 
         window.onload = () => chatApp.init();
-        window.onbeforeunload = () => { if (chatApp.isConnected) chatApp.leaveRoom(); };
     </script>
 </body>
 </html>
