@@ -1,5 +1,5 @@
 {
-  "name": "voice-chat-webrtc",
+  "name": "voice-chat",
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
