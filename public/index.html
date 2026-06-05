@@ -40,7 +40,7 @@
         }
 
         .hidden {
-            display: none;
+            display: none !important;
         }
 
         .input-group {
@@ -64,7 +64,6 @@
             color: white;
             font-size: 1em;
             outline: none;
-            transition: all 0.3s;
         }
 
         input:focus {
@@ -99,7 +98,7 @@
             box-shadow: 0 10px 30px rgba(0,0,0,0.3);
         }
 
-        .btn-primary:disabled {
+        .btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
@@ -109,12 +108,10 @@
             display: flex;
             gap: 15px;
             margin-top: 20px;
-            flex-wrap: wrap;
         }
 
         .btn-control {
             flex: 1;
-            min-width: 120px;
             padding: 12px;
             border: 2px solid rgba(255,255,255,0.3);
             border-radius: 15px;
@@ -164,7 +161,7 @@
         }
 
         .volume-bar {
-            margin-top: 15px;
+            margin: 15px 0;
             padding: 10px;
             background: rgba(0,0,0,0.2);
             border-radius: 10px;
@@ -177,6 +174,7 @@
             border-radius: 3px;
             transition: width 0.1s;
             margin-top: 5px;
+            width: 0%;
         }
 
         .status-text {
@@ -194,19 +192,12 @@
             text-align: center;
             font-size: 0.9em;
         }
-
-        .debug-info {
-            margin-top: 10px;
-            font-size: 0.8em;
-            opacity: 0.7;
-            text-align: center;
-        }
     </style>
 </head>
 <body>
     <div class="container">
         <!-- Экран входа -->
-        <div id="joinScreen" class="join-screen">
+        <div id="joinScreen">
             <h1>🎙️ Голосовой Чат</h1>
             <div class="input-group">
                 <label>Ваше имя:</label>
@@ -216,386 +207,338 @@
                 <label>ID комнаты:</label>
                 <input type="text" id="roomId" placeholder="Введите ID комнаты" value="general">
             </div>
-            <button id="joinBtn" class="btn btn-primary" onclick="joinRoom()">
+            <button id="joinBtn" class="btn btn-primary" onclick="window.chatApp.joinRoom()">
                 Присоединиться
             </button>
             <div id="errorMessage" class="error-message"></div>
         </div>
 
         <!-- Экран чата -->
-        <div id="chatScreen" class="chat-screen hidden">
+        <div id="chatScreen" class="hidden">
             <h1>🎙️ <span id="currentRoom">general</span></h1>
             
             <div class="volume-bar">
                 🔊 Ваш микрофон
-                <div class="volume-fill" id="volumeFill" style="width: 0%"></div>
+                <div id="volumeFill" class="volume-fill"></div>
             </div>
             
-            <div class="status-text" id="connectionStatus">
+            <div id="connectionStatus" class="status-text">
                 🔗 Подключение...
             </div>
 
             <div class="controls">
-                <button id="muteBtn" class="btn-control" onclick="toggleMute()">
+                <button id="muteBtn" class="btn-control" onclick="window.chatApp.toggleMute()">
                     🔊 Микрофон
                 </button>
-                <button class="btn-control" onclick="leaveRoom()">
+                <button class="btn-control" onclick="window.chatApp.leaveRoom()">
                     🚪 Выйти
                 </button>
             </div>
 
-            <div class="users-list" id="usersList">
+            <div id="usersList" class="users-list">
                 <h3>👥 Участники:</h3>
             </div>
-
-            <div class="debug-info" id="debugInfo"></div>
         </div>
     </div>
 
-    <!-- PeerJS для WebRTC -->
-    <script src="https://unpkg.com/peerjs@1.5.1/dist/peerjs.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        let socket;
-        let peer;
-        let localStream;
-        let isMuted = false;
-        let myPeerId;
-        let peers = {}; // Храним подключения к другим пользователям
-        let audioContext;
-        let isConnected = false;
-
-        // Инициализация
-        function init() {
-            socket = io({
-                transports: ['websocket', 'polling']
-            });
-
-            socket.on('connect', () => {
-                console.log('✅ Socket подключен');
-                document.getElementById('debugInfo').textContent = 'Сокет подключен';
-            });
-
-            socket.on('existing-users', (users) => {
-                console.log('👥 Существующие пользователи:', users);
-                users.forEach(user => {
-                    connectToPeer(user.peerId);
-                });
-            });
-
-            socket.on('user-connected', (user) => {
-                console.log('👤 Новый пользователь:', user);
-                connectToPeer(user.peerId);
-                addUserToList(user);
-            });
-
-            socket.on('user-disconnected', (userId) => {
-                console.log('👋 Пользователь ушел:', userId);
-                removeUserFromList(userId);
-                if (peers[userId]) {
-                    peers[userId].close();
-                    delete peers[userId];
-                }
-            });
-
-            socket.on('users-update', (users) => {
-                updateUsersList(users);
-            });
-
-            socket.on('user-mute-update', (data) => {
-                updateUserMuteStatus(data.userId, data.muted);
-            });
-
-            socket.on('disconnect', () => {
-                console.log('❌ Сокет отключен');
-                document.getElementById('debugInfo').textContent = 'Сокет отключен';
-            });
-        }
-
-        // Подключение к пиру через WebRTC
-        function connectToPeer(peerId) {
-            if (peerId === myPeerId || peers[peerId]) return;
-
-            console.log('🔗 Подключаюсь к пиру:', peerId);
+        // Основной объект приложения
+        window.chatApp = {
+            socket: null,
+            mediaStream: null,
+            mediaRecorder: null,
+            audioContext: null,
+            isMuted: false,
+            isConnected: false,
             
-            const call = peer.call(peerId, localStream, {
-                metadata: { type: 'audio' }
-            });
+            // Очередь аудио для воспроизведения
+            audioQueue: [],
+            isPlaying: false,
+            currentAudio: null,
 
-            call.on('stream', (remoteStream) => {
-                console.log('📡 Получен поток от:', peerId);
-                const audio = new Audio();
-                audio.srcObject = remoteStream;
-                audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
-                
-                // Сохраняем аудио элемент
-                peers[peerId] = {
-                    call: call,
-                    audio: audio
-                };
-            });
-
-            call.on('error', (error) => {
-                console.error('❌ Ошибка звонка:', error);
-                document.getElementById('debugInfo').textContent = 'Ошибка WebRTC: ' + error;
-            });
-
-            call.on('close', () => {
-                console.log('🔒 Звонок закрыт:', peerId);
-                if (peers[peerId]) {
-                    delete peers[peerId];
-                }
-            });
-        }
-
-        // Присоединение к комнате
-        async function joinRoom() {
-            const userName = document.getElementById('userName').value.trim() || 'User';
-            const roomId = document.getElementById('roomId').value.trim() || 'general';
-            const joinBtn = document.getElementById('joinBtn');
-
-            try {
-                joinBtn.disabled = true;
-                joinBtn.textContent = 'Подключение...';
-
-                // Получаем доступ к микрофону
-                localStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true,
-                        sampleRate: 48000,
-                        channelCount: 1
-                    }
+            init: function() {
+                this.socket = io({
+                    transports: ['websocket', 'polling']
                 });
 
-                console.log('🎤 Микрофон получен');
-
-                // Создаем AudioContext для визуализации
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const source = audioContext.createMediaStreamSource(localStream);
-                const analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256;
-                source.connect(analyser);
-
-                // Создаем PeerJS подключение
-                peer = new Peer(undefined, {
-                    host: '0.peerjs.com',
-                    port: 443,
-                    secure: true,
-                    debug: 2
+                this.socket.on('connect', () => {
+                    console.log('✅ Подключен к серверу');
                 });
 
-                peer.on('open', (id) => {
-                    console.log('🆔 Мой Peer ID:', id);
-                    myPeerId = id;
-                    
-                    // Присоединяемся к комнате
-                    socket.emit('join-room', {
-                        roomId: roomId,
-                        userName: userName,
-                        peerId: id
+                this.socket.on('users-update', (users) => {
+                    this.updateUsersList(users);
+                });
+
+                this.socket.on('user-connected', (user) => {
+                    console.log('👤 Присоединился:', user.name);
+                });
+
+                this.socket.on('user-disconnected', (userId) => {
+                    console.log('👋 Отключился:', userId);
+                });
+
+                this.socket.on('user-mute-update', (data) => {
+                    this.updateUserMuteStatus(data.userId, data.muted);
+                });
+
+                this.socket.on('mute-status', (muted) => {
+                    this.isMuted = muted;
+                    this.updateMuteButton();
+                });
+
+                this.socket.on('audio-stream', (data) => {
+                    this.playAudio(data.audio);
+                });
+
+                this.socket.on('disconnect', () => {
+                    console.log('❌ Отключен от сервера');
+                });
+            },
+
+            joinRoom: async function() {
+                const userName = document.getElementById('userName').value.trim() || 'User';
+                const roomId = document.getElementById('roomId').value.trim() || 'general';
+                const joinBtn = document.getElementById('joinBtn');
+
+                try {
+                    joinBtn.disabled = true;
+                    joinBtn.textContent = 'Подключение...';
+
+                    // Получаем доступ к микрофону
+                    this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true,
+                            sampleRate: 48000,
+                            channelCount: 1
+                        }
                     });
+
+                    console.log('🎤 Микрофон получен');
+
+                    // Создаем AudioContext для визуализации
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    const analyser = this.audioContext.createAnalyser();
+                    analyser.fftSize = 256;
+                    source.connect(analyser);
+
+                    // Создаем MediaRecorder для записи
+                    const options = {
+                        mimeType: 'audio/webm;codecs=opus',
+                        audioBitsPerSecond: 64000
+                    };
+
+                    if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                        options.mimeType = 'audio/webm';
+                    }
+
+                    this.mediaRecorder = new MediaRecorder(this.mediaStream, options);
+                    
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0 && !this.isMuted && this.isConnected) {
+                            this.sendAudioData(event.data);
+                        }
+                    };
+
+                    // Записываем и отправляем каждые 100мс
+                    this.mediaRecorder.start(100);
+
+                    // Присоединяемся к комнате
+                    this.socket.emit('join-room', { roomId, userName });
 
                     // Переключаем экраны
                     document.getElementById('joinScreen').classList.add('hidden');
                     document.getElementById('chatScreen').classList.remove('hidden');
                     document.getElementById('currentRoom').textContent = roomId;
-                    document.getElementById('connectionStatus').textContent = '🟢 Подключен';
-                    document.getElementById('debugInfo').textContent = 'Peer ID: ' + id;
-
-                    isConnected = true;
-
-                    // Запускаем мониторинг микрофона
-                    startVolumeMeter(analyser);
-                });
-
-                // Принимаем входящие звонки
-                peer.on('call', (call) => {
-                    console.log('📞 Входящий звонок от:', call.peer);
-                    call.answer(localStream);
+                    document.getElementById('connectionStatus').textContent = '🟢 Онлайн';
                     
-                    call.on('stream', (remoteStream) => {
-                        console.log('📡 Получен входящий поток от:', call.peer);
-                        const audio = new Audio();
-                        audio.srcObject = remoteStream;
-                        audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
-                        
-                        peers[call.peer] = {
-                            call: call,
-                            audio: audio
-                        };
-                    });
+                    this.isConnected = true;
 
-                    call.on('error', (error) => {
-                        console.error('❌ Ошибка входящего звонка:', error);
-                    });
+                    // Запускаем мониторинг громкости
+                    this.startVolumeMeter(analyser);
 
-                    call.on('close', () => {
-                        console.log('🔒 Входящий звонок закрыт:', call.peer);
-                        if (peers[call.peer]) {
-                            delete peers[call.peer];
+                    console.log('✅ Вошли в комнату:', roomId);
+
+                } catch (error) {
+                    console.error('❌ Ошибка:', error);
+                    document.getElementById('errorMessage').textContent = 
+                        'Ошибка: ' + error.message;
+                    joinBtn.disabled = false;
+                    joinBtn.textContent = 'Присоединиться';
+                }
+            },
+
+            sendAudioData: function(audioBlob) {
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const base64data = reader.result.split(',')[1];
+                    if (base64data && this.socket.connected) {
+                        this.socket.emit('audio-stream', base64data);
+                    }
+                };
+                reader.readAsDataURL(audioBlob);
+            },
+
+            playAudio: function(base64Audio) {
+                try {
+                    // Конвертируем base64 в blob
+                    const binaryString = atob(base64Audio);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+                    
+                    const audioBlob = new Blob([bytes], { type: 'audio/webm' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    const audio = new Audio(audioUrl);
+                    
+                    audio.onended = () => {
+                        URL.revokeObjectURL(audioUrl);
+                    };
+                    
+                    audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
+                    
+                } catch (error) {
+                    console.error('Ошибка декодирования аудио:', error);
+                }
+            },
+
+            startVolumeMeter: function(analyser) {
+                const self = this;
+                const dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                function updateMeter() {
+                    if (!self.isConnected) return;
+                    
+                    analyser.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for (let i = 0; i < dataArray.length; i++) {
+                        sum += dataArray[i];
+                    }
+                    const average = sum / dataArray.length;
+                    const volume = Math.min(100, Math.round((average / 255) * 100));
+                    
+                    const volumeFill = document.getElementById('volumeFill');
+                    if (volumeFill) {
+                        volumeFill.style.width = volume + '%';
+                    }
+                    
+                    requestAnimationFrame(updateMeter);
+                }
+                
+                updateMeter();
+            },
+
+            toggleMute: function() {
+                if (!this.isConnected || !this.mediaStream) return;
+                
+                this.isMuted = !this.isMuted;
+                
+                // Отключаем аудио дорожку
+                this.mediaStream.getAudioTracks().forEach(track => {
+                    track.enabled = !this.isMuted;
+                });
+                
+                this.socket.emit('toggle-mute');
+                this.updateMuteButton();
+                
+                document.getElementById('connectionStatus').textContent = 
+                    this.isMuted ? '🔇 Микрофон выключен' : '🟢 Онлайн';
+            },
+
+            updateMuteButton: function() {
+                const muteBtn = document.getElementById('muteBtn');
+                if (this.isMuted) {
+                    muteBtn.textContent = '🔇 Включить микрофон';
+                    muteBtn.classList.add('btn-muted');
+                } else {
+                    muteBtn.textContent = '🔊 Выключить микрофон';
+                    muteBtn.classList.remove('btn-muted');
+                }
+            },
+
+            updateUsersList: function(users) {
+                const usersList = document.getElementById('usersList');
+                usersList.innerHTML = '<h3>👥 Участники:</h3>';
+                
+                users.forEach(user => {
+                    const userElement = document.createElement('div');
+                    userElement.className = 'user-item';
+                    userElement.innerHTML = `
+                        <div class="status-dot ${user.muted ? 'status-muted' : ''}"></div>
+                        <span>${user.name} ${user.id === this.socket.id ? '(вы)' : ''}</span>
+                        ${user.muted ? '<span>🔇</span>' : ''}
+                    `;
+                    usersList.appendChild(userElement);
+                });
+            },
+
+            updateUserMuteStatus: function(userId, muted) {
+                const usersList = document.getElementById('usersList');
+                const userItems = usersList.querySelectorAll('.user-item');
+                userItems.forEach(item => {
+                    if (item.textContent.includes(userId)) {
+                        const dot = item.querySelector('.status-dot');
+                        if (muted) {
+                            dot.classList.add('status-muted');
+                        } else {
+                            dot.classList.remove('status-muted');
                         }
-                    });
+                    }
                 });
+            },
 
-                peer.on('error', (error) => {
-                    console.error('❌ Ошибка PeerJS:', error);
-                    document.getElementById('debugInfo').textContent = 'Ошибка PeerJS: ' + error;
-                });
-
-                peer.on('disconnected', () => {
-                    console.log('⚠️ PeerJS отключен, переподключаю...');
-                    peer.reconnect();
-                });
-
-            } catch (error) {
-                console.error('❌ Ошибка:', error);
-                document.getElementById('errorMessage').textContent = 
-                    'Ошибка: ' + error.message;
+            leaveRoom: function() {
+                // Останавливаем запись
+                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                    this.mediaRecorder.stop();
+                }
+                
+                // Останавливаем медиа поток
+                if (this.mediaStream) {
+                    this.mediaStream.getTracks().forEach(track => track.stop());
+                }
+                
+                // Закрываем аудио контекст
+                if (this.audioContext) {
+                    this.audioContext.close();
+                }
+                
+                // Отключаем сокет
+                if (this.socket) {
+                    this.socket.disconnect();
+                }
+                
+                this.isConnected = false;
+                
+                // Возвращаемся на экран входа
+                document.getElementById('joinScreen').classList.remove('hidden');
+                document.getElementById('chatScreen').classList.add('hidden');
+                
+                const joinBtn = document.getElementById('joinBtn');
                 joinBtn.disabled = false;
                 joinBtn.textContent = 'Присоединиться';
-            }
-        }
-
-        // Индикатор громкости
-        function startVolumeMeter(analyser) {
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            
-            function updateMeter() {
-                if (!isConnected) return;
                 
-                analyser.getByteFrequencyData(dataArray);
-                let sum = 0;
-                for (let i = 0; i < dataArray.length; i++) {
-                    sum += dataArray[i];
-                }
-                const average = sum / dataArray.length;
-                const volume = Math.min(100, Math.round((average / 255) * 100));
+                // Переинициализируем
+                this.init();
                 
-                document.getElementById('volumeFill').style.width = volume + '%';
-                
-                requestAnimationFrame(updateMeter);
+                console.log('👋 Вышли из комнаты');
             }
-            
-            updateMeter();
-        }
-
-        // Мут
-        function toggleMute() {
-            if (!isConnected || !localStream) return;
-            
-            isMuted = !isMuted;
-            localStream.getAudioTracks().forEach(track => {
-                track.enabled = !isMuted;
-            });
-            
-            socket.emit('toggle-mute');
-            
-            const muteBtn = document.getElementById('muteBtn');
-            if (isMuted) {
-                muteBtn.textContent = '🔇 Микрофон выключен';
-                muteBtn.classList.add('btn-muted');
-            } else {
-                muteBtn.textContent = '🔊 Микрофон';
-                muteBtn.classList.remove('btn-muted');
-            }
-        }
-
-        // Список пользователей
-        function addUserToList(user) {
-            const usersList = document.getElementById('usersList');
-            const existingUser = document.getElementById('user-' + user.id);
-            if (existingUser) return;
-            
-            const userElement = document.createElement('div');
-            userElement.className = 'user-item';
-            userElement.id = 'user-' + user.id;
-            userElement.innerHTML = `
-                <div class="status-dot"></div>
-                <span>${user.name}</span>
-            `;
-            usersList.appendChild(userElement);
-        }
-
-        function removeUserFromList(userId) {
-            const userElement = document.getElementById('user-' + userId);
-            if (userElement) {
-                userElement.remove();
-            }
-        }
-
-        function updateUsersList(users) {
-            const usersList = document.getElementById('usersList');
-            usersList.innerHTML = '<h3>👥 Участники:</h3>';
-            
-            users.forEach(user => {
-                const userElement = document.createElement('div');
-                userElement.className = 'user-item';
-                userElement.id = 'user-' + user.id;
-                userElement.innerHTML = `
-                    <div class="status-dot ${user.muted ? 'status-muted' : ''}"></div>
-                    <span>${user.name} ${user.id === socket.id ? '(вы)' : ''}</span>
-                    ${user.muted ? '<span>(🔇)</span>' : ''}
-                `;
-                usersList.appendChild(userElement);
-            });
-        }
-
-        function updateUserMuteStatus(userId, muted) {
-            const userElement = document.getElementById('user-' + userId);
-            if (userElement) {
-                const dot = userElement.querySelector('.status-dot');
-                if (muted) {
-                    dot.classList.add('status-muted');
-                } else {
-                    dot.classList.remove('status-muted');
-                }
-            }
-        }
-
-        // Выход
-        function leaveRoom() {
-            if (localStream) {
-                localStream.getTracks().forEach(track => track.stop());
-            }
-            
-            // Закрываем все WebRTC соединения
-            Object.values(peers).forEach(peer => {
-                if (peer.call) peer.call.close();
-            });
-            peers = {};
-            
-            if (peer) {
-                peer.destroy();
-            }
-            
-            if (audioContext) {
-                audioContext.close();
-            }
-            
-            if (socket) {
-                socket.disconnect();
-            }
-            
-            isConnected = false;
-            
-            document.getElementById('joinScreen').classList.remove('hidden');
-            document.getElementById('chatScreen').classList.add('hidden');
-            document.getElementById('joinBtn').disabled = false;
-            document.getElementById('joinBtn').textContent = 'Присоединиться';
-            
-            // Переинициализируем сокет
-            init();
-        }
-
-        // Старт
-        window.onload = () => {
-            init();
         };
 
+        // Запуск при загрузке
+        window.onload = () => {
+            window.chatApp.init();
+        };
+
+        // Очистка при закрытии
         window.onbeforeunload = () => {
-            leaveRoom();
+            if (window.chatApp.isConnected) {
+                window.chatApp.leaveRoom();
+            }
         };
     </script>
 </body>
