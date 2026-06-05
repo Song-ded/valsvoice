@@ -9,7 +9,10 @@ const io = new Server(server, {
     cors: {
         origin: "*",
         methods: ["GET", "POST"]
-    }
+    },
+    maxHttpBufferSize: 1e8, // 100MB буфер для аудио
+    pingTimeout: 60000,
+    pingInterval: 25000
 });
 
 app.use(express.static('public'));
@@ -24,12 +27,11 @@ io.on('connection', (socket) => {
     console.log(`👤 Подключился: ${socket.id}`);
 
     socket.on('join-room', (data) => {
-        const { roomId, userName, peerId } = data;
+        const { roomId, userName } = data;
         
         socket.join(roomId);
         socket.roomId = roomId;
         socket.userName = userName || 'Гость';
-        socket.peerId = peerId;
         socket.isMuted = false;
 
         if (!rooms.has(roomId)) {
@@ -39,31 +41,32 @@ io.on('connection', (socket) => {
         rooms.get(roomId).set(socket.id, {
             id: socket.id,
             name: socket.userName,
-            peerId: peerId,
             muted: false
         });
 
-        // Отправляем новому пользователю список всех кто уже в комнате
-        const existingUsers = [];
-        rooms.get(roomId).forEach((user, userId) => {
-            if (userId !== socket.id) {
-                existingUsers.push(user);
-            }
-        });
-        socket.emit('existing-users', existingUsers);
-
-        // Сообщаем остальным о новом пользователе
+        // Сообщаем всем о новом пользователе
         socket.to(roomId).emit('user-connected', {
             id: socket.id,
-            name: socket.userName,
-            peerId: peerId
+            name: socket.userName
         });
 
-        // Обновляем список для всех
+        // Отправляем обновленный список
         const usersList = Array.from(rooms.get(roomId).values());
         io.to(roomId).emit('users-update', usersList);
 
-        console.log(`📢 ${socket.userName} зашел в комнату ${roomId}`);
+        console.log(`📢 ${socket.userName} зашел в комнату ${roomId} (всего: ${usersList.length})`);
+    });
+
+    // Пересылка аудио между пользователями
+    socket.on('audio-stream', (audioData) => {
+        if (socket.roomId && !socket.isMuted) {
+            // Отправляем аудио всем в комнате кроме отправителя
+            socket.to(socket.roomId).emit('audio-stream', {
+                userId: socket.id,
+                userName: socket.userName,
+                audio: audioData
+            });
+        }
     });
 
     socket.on('toggle-mute', () => {
@@ -79,11 +82,14 @@ io.on('connection', (socket) => {
                 userId: socket.id,
                 muted: socket.isMuted
             });
+
+            socket.emit('mute-status', socket.isMuted);
+            console.log(`🔇 ${socket.userName} ${socket.isMuted ? 'замутился' : 'включил микрофон'}`);
         }
     });
 
     socket.on('disconnect', () => {
-        console.log(`👋 Отключился: ${socket.id}`);
+        console.log(`👋 Отключился: ${socket.id} (${socket.userName})`);
         
         if (socket.roomId && rooms.has(socket.roomId)) {
             rooms.get(socket.roomId).delete(socket.id);
@@ -102,5 +108,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`🚀 Сервер на порту ${PORT}`);
+    console.log(`🚀 Сервер запущен на порту ${PORT}`);
 });
