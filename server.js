@@ -7,7 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] },
-    maxHttpBufferSize: 5e6 // 5MB на аудио
+    maxHttpBufferSize: 1e8
 });
 
 app.use(express.static('public'));
@@ -35,7 +35,8 @@ io.on('connection', (socket) => {
             muted: false
         });
 
-        socket.to(roomId).emit('user-connected', {
+        // Говорим всем в комнате о новом пользователе
+        socket.to(roomId).emit('user-joined', {
             id: socket.id,
             name: socket.userName
         });
@@ -43,17 +44,29 @@ io.on('connection', (socket) => {
         io.to(roomId).emit('users-update', 
             Array.from(rooms.get(roomId).values())
         );
-
-        console.log(`📢 ${socket.userName} → ${roomId}`);
     });
 
-    socket.on('audio-stream', (data) => {
-        if (socket.roomId && !socket.isMuted) {
-            socket.to(socket.roomId).emit('audio-stream', {
-                userId: socket.id,
-                audio: data
-            });
-        }
+    // WebRTC сигналинг
+    socket.on('offer', ({ offer, to }) => {
+        socket.to(to).emit('offer', {
+            offer: offer,
+            from: socket.id,
+            name: socket.userName
+        });
+    });
+
+    socket.on('answer', ({ answer, to }) => {
+        socket.to(to).emit('answer', {
+            answer: answer,
+            from: socket.id
+        });
+    });
+
+    socket.on('ice-candidate', ({ candidate, to }) => {
+        socket.to(to).emit('ice-candidate', {
+            candidate: candidate,
+            from: socket.id
+        });
     });
 
     socket.on('toggle-mute', () => {
@@ -83,8 +96,7 @@ io.on('connection', (socket) => {
             );
         }
         
-        socket.to(socket.roomId).emit('user-disconnected', socket.id);
-        console.log(`👋 ${socket.userName || socket.id}`);
+        socket.to(socket.roomId).emit('user-left', socket.id);
     });
 });
 
