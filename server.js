@@ -6,13 +6,8 @@ const { Server } = require('socket.io');
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: {
-        origin: "*",
-        methods: ["GET", "POST"]
-    },
-    maxHttpBufferSize: 1e8,
-    pingTimeout: 60000,
-    pingInterval: 25000
+    cors: { origin: "*", methods: ["GET", "POST"] },
+    maxHttpBufferSize: 5e6 // 5MB на аудио
 });
 
 app.use(express.static('public'));
@@ -24,19 +19,15 @@ app.get('/', (req, res) => {
 const rooms = new Map();
 
 io.on('connection', (socket) => {
-    console.log(`👤 Подключился: ${socket.id}`);
+    console.log(`👤 ${socket.id}`);
 
-    socket.on('join-room', (data) => {
-        const { roomId, userName } = data;
-        
+    socket.on('join-room', ({ roomId, userName }) => {
         socket.join(roomId);
         socket.roomId = roomId;
         socket.userName = userName || 'Гость';
         socket.isMuted = false;
 
-        if (!rooms.has(roomId)) {
-            rooms.set(roomId, new Map());
-        }
+        if (!rooms.has(roomId)) rooms.set(roomId, new Map());
         
         rooms.get(roomId).set(socket.id, {
             id: socket.id,
@@ -49,59 +40,53 @@ io.on('connection', (socket) => {
             name: socket.userName
         });
 
-        const usersList = Array.from(rooms.get(roomId).values());
-        io.to(roomId).emit('users-update', usersList);
+        io.to(roomId).emit('users-update', 
+            Array.from(rooms.get(roomId).values())
+        );
 
-        console.log(`📢 ${socket.userName} зашел в комнату ${roomId} (всего: ${usersList.length})`);
+        console.log(`📢 ${socket.userName} → ${roomId}`);
     });
 
-    socket.on('audio-stream', (audioData) => {
+    socket.on('audio-stream', (data) => {
         if (socket.roomId && !socket.isMuted) {
             socket.to(socket.roomId).emit('audio-stream', {
                 userId: socket.id,
-                userName: socket.userName,
-                audio: audioData
+                audio: data
             });
         }
     });
 
     socket.on('toggle-mute', () => {
-        if (socket.roomId && rooms.has(socket.roomId)) {
-            socket.isMuted = !socket.isMuted;
-            const userRoom = rooms.get(socket.roomId);
-            
-            if (userRoom.has(socket.id)) {
-                userRoom.get(socket.id).muted = socket.isMuted;
-            }
+        if (!socket.roomId || !rooms.has(socket.roomId)) return;
+        
+        socket.isMuted = !socket.isMuted;
+        const user = rooms.get(socket.roomId).get(socket.id);
+        if (user) user.muted = socket.isMuted;
 
-            io.to(socket.roomId).emit('user-mute-update', {
-                userId: socket.id,
-                muted: socket.isMuted
-            });
-
-            socket.emit('mute-status', socket.isMuted);
-        }
+        io.to(socket.roomId).emit('user-mute-update', {
+            userId: socket.id,
+            muted: socket.isMuted
+        });
+        socket.emit('mute-status', socket.isMuted);
     });
 
     socket.on('disconnect', () => {
-        console.log(`👋 Отключился: ${socket.id}`);
+        if (!socket.roomId || !rooms.has(socket.roomId)) return;
         
-        if (socket.roomId && rooms.has(socket.roomId)) {
-            rooms.get(socket.roomId).delete(socket.id);
-            
-            if (rooms.get(socket.roomId).size === 0) {
-                rooms.delete(socket.roomId);
-            } else {
-                const usersList = Array.from(rooms.get(socket.roomId).values());
-                io.to(socket.roomId).emit('users-update', usersList);
-            }
-
-            socket.to(socket.roomId).emit('user-disconnected', socket.id);
+        rooms.get(socket.roomId).delete(socket.id);
+        
+        if (rooms.get(socket.roomId).size === 0) {
+            rooms.delete(socket.roomId);
+        } else {
+            io.to(socket.roomId).emit('users-update',
+                Array.from(rooms.get(socket.roomId).values())
+            );
         }
+        
+        socket.to(socket.roomId).emit('user-disconnected', socket.id);
+        console.log(`👋 ${socket.userName || socket.id}`);
     });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log(`🚀 Сервер запущен на порту ${PORT}`);
-});
+server.listen(PORT, () => console.log(`🚀 Порт ${PORT}`));
