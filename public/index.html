@@ -144,21 +144,19 @@
     <script>
         const chatApp = {
             socket: null,
-            mediaStream: null,
-            mediaRecorder: null,
             audioContext: null,
+            mediaStream: null,
+            scriptProcessor: null,
             isMuted: false,
             isConnected: false,
-            remoteAudio: null,
+            playbackContext: null,
 
             init() {
                 this.socket = io({ transports: ['websocket', 'polling'] });
 
                 this.socket.on('connect', () => console.log('✅ Подключен'));
                 
-                this.socket.on('users-update', (users) => {
-                    this.renderUsers(users);
-                });
+                this.socket.on('users-update', (users) => this.renderUsers(users));
 
                 this.socket.on('user-connected', (user) => {
                     console.log('👤', user.name, 'присоединился');
@@ -166,6 +164,7 @@
 
                 this.socket.on('user-disconnected', (userId) => {
                     console.log('👋', userId, 'отключился');
+                    this.renderUsers([]);
                 });
 
                 this.socket.on('user-mute-update', (data) => {
@@ -177,8 +176,9 @@
                     this.updateMuteBtn();
                 });
 
+                // Принимаем аудио как ArrayBuffer (передаётся через base64)
                 this.socket.on('audio-stream', (data) => {
-                    this.playRemoteAudio(data.audio);
+                    this.playAudio(data.audio);
                 });
             },
 
@@ -196,42 +196,49 @@
                         audio: {
                             echoCancellation: true,
                             noiseSuppression: true,
-                            autoGainControl: true
+                            autoGainControl: true,
+                            sampleRate: 22050,
+                            channelCount: 1
                         }
                     });
 
-                    // Аудиоконтекст для громкости
-                    this.audioContext = new AudioContext();
+                    // Создаём AudioContext
+                    this.audioContext = new (window.AudioContext || window.webkitAudioContext)({
+                        sampleRate: 22050
+                    });
+
                     const source = this.audioContext.createMediaStreamSource(this.mediaStream);
+                    
+                    // Анализатор для громкости
                     const analyser = this.audioContext.createAnalyser();
                     analyser.fftSize = 256;
                     source.connect(analyser);
+                    
+                    // ScriptProcessor для захвата аудио (работает везде)
+                    this.scriptProcessor = this.audioContext.createScriptProcessor(2048, 1, 1);
+                    source.connect(this.scriptProcessor);
+                    this.scriptProcessor.connect(this.audioContext.destination);
 
-                    // MediaRecorder для записи
-                    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') 
-                        ? 'audio/webm;codecs=opus' 
-                        : 'audio/webm';
-
-                    this.mediaRecorder = new MediaRecorder(this.mediaStream, {
-                        mimeType: mimeType,
-                        audioBitsPerSecond: 64000
-                    });
-
-                    this.mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0 && !this.isMuted && this.isConnected) {
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                                const base64 = reader.result.split(',')[1];
-                                if (base64 && this.socket.connected) {
-                                    this.socket.emit('audio-stream', base64);
-                                }
-                            };
-                            reader.readAsDataURL(event.data);
+                    // Отправляем аудио
+                    this.scriptProcessor.onaudioprocess = (e) => {
+                        if (!this.isMuted && this.isConnected) {
+                            const input = e.inputBuffer.getChannelData(0);
+                            // Конвертируем Float32 в Int16
+                            const int16 = new Int16Array(input.length);
+                            for (let i = 0; i < input.length; i++) {
+                                const s = Math.max(-1, Math.min(1, input[i]));
+                                int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+                            }
+                            // В base64
+                            const uint8 = new Uint8Array(int16.buffer);
+                            let binary = '';
+                            for (let i = 0; i < uint8.length; i++) {
+                                binary += String.fromCharCode(uint8[i]);
+                            }
+                            const base64 = btoa(binary);
+                            this.socket.emit('audio-stream', base64);
                         }
                     };
-
-                    // Запускаем запись чанками по 250мс
-                    this.mediaRecorder.start(250);
 
                     // Входим в комнату
                     this.socket.emit('join-room', { roomId, userName });
@@ -252,25 +259,41 @@
                 }
             },
 
-            playRemoteAudio(base64Data) {
+            playAudio(base64Data) {
                 try {
-                    // Создаём Blob из base64
-                    const binaryStr = atob(base64Data);
-                    const bytes = new Uint8Array(binaryStr.length);
-                    for (let i = 0; i < binaryStr.length; i++) {
-                        bytes[i] = binaryStr.charCodeAt(i);
+                    // Декодируем base64 в Int16Array
+                    const binary = atob(base64Data);
+                    const uint8 = new Uint8Array(binary.length);
+                    for (let i = 0; i < binary.length; i++) {
+                        uint8[i] = binary.charCodeAt(i);
                     }
                     
-                    const blob = new Blob([bytes], { type: 'audio/webm' });
-                    const url = URL.createObjectURL(blob);
-                    const audio = new Audio(url);
+                    const int16 = new Int16Array(uint8.buffer);
                     
-                    audio.onended = () => URL.revokeObjectURL(url);
-                    audio.onerror = () => URL.revokeObjectURL(url);
+                    // Конвертируем в Float32
+                    const float32 = new Float32Array(int16.length);
+                    for (let i = 0; i < int16.length; i++) {
+                        float32[i] = int16[i] / 32768.0;
+                    }
                     
-                    audio.play().catch(e => console.log('Play error:', e));
+                    // Создаём контекст если нужно
+                    if (!this.playbackContext) {
+                        this.playbackContext = new (window.AudioContext || window.webkitAudioContext)({
+                            sampleRate: 22050
+                        });
+                    }
+                    
+                    // Создаём буфер и проигрываем
+                    const buffer = this.playbackContext.createBuffer(1, float32.length, 22050);
+                    buffer.getChannelData(0).set(float32);
+                    
+                    const source = this.playbackContext.createBufferSource();
+                    source.buffer = buffer;
+                    source.connect(this.playbackContext.destination);
+                    source.start();
+                    
                 } catch (e) {
-                    console.error('Audio error:', e);
+                    console.error('Ошибка воспроизведения:', e);
                 }
             },
 
@@ -334,14 +357,18 @@
             },
 
             leaveRoom() {
-                if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
-                    this.mediaRecorder.stop();
+                if (this.scriptProcessor) {
+                    this.scriptProcessor.disconnect();
+                    this.scriptProcessor = null;
                 }
                 if (this.mediaStream) {
                     this.mediaStream.getTracks().forEach(t => t.stop());
                 }
                 if (this.audioContext) {
                     this.audioContext.close();
+                }
+                if (this.playbackContext) {
+                    this.playbackContext.close();
                 }
                 if (this.socket) {
                     this.socket.disconnect();
