@@ -235,71 +235,49 @@
         let socket;
         let audioContext;
         let mediaStream;
-        let noiseFilter;
         let isMuted = false;
         let isConnected = false;
+        let mediaRecorder;
+        let audioQueue = [];
+        let isPlaying = false;
         
-        // Web Audio API для шумоподавления
-        class NoiseSuppressor {
-            constructor(audioContext) {
-                this.context = audioContext;
-                this.noiseGate = audioContext.createGain();
-                this.analyser = audioContext.createAnalyser();
-                this.analyser.fftSize = 2048;
+        // Очередь для воспроизведения аудио
+        async function playNextInQueue() {
+            if (isPlaying || audioQueue.length === 0) return;
+            
+            isPlaying = true;
+            const audioData = audioQueue.shift();
+            
+            try {
+                const audioBlob = new Blob([audioData], { type: 'audio/webm' });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                const audio = new Audio(audioUrl);
                 
-                // Создаем аудио фильтры
-                this.lowPass = audioContext.createBiquadFilter();
-                this.lowPass.type = 'lowpass';
-                this.lowPass.frequency.value = 8000; // Обрезаем высокие частоты
+                audio.onended = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    isPlaying = false;
+                    playNextInQueue();
+                };
                 
-                this.highPass = audioContext.createBiquadFilter();
-                this.highPass.type = 'highpass';
-                this.highPass.frequency.value = 80; // Обрезаем низкие частоты (гул)
+                audio.onerror = () => {
+                    URL.revokeObjectURL(audioUrl);
+                    isPlaying = false;
+                    playNextInQueue();
+                };
                 
-                // Компрессор для выравнивания громкости
-                this.compressor = audioContext.createDynamicsCompressor();
-                this.compressor.threshold.value = -50;
-                this.compressor.knee.value = 40;
-                this.compressor.ratio.value = 12;
-                this.compressor.attack.value = 0;
-                this.compressor.release.value = 0.25;
-            }
-
-            connect(source) {
-                // Цепочка обработки: source -> highPass -> lowPass -> compressor -> noiseGate -> analyser
-                source.connect(this.highPass);
-                this.highPass.connect(this.lowPass);
-                this.lowPass.connect(this.compressor);
-                this.compressor.connect(this.noiseGate);
-                this.noiseGate.connect(this.analyser);
-                
-                return this.analyser;
-            }
-
-            // Адаптивный шумовой порог
-            updateNoiseGate(level) {
-                // Динамически настраиваем гейт в зависимости от уровня сигнала
-                if (level < 0.01) {
-                    this.noiseGate.gain.value = 0; // Полная тишина при низком уровне
-                } else if (level < 0.05) {
-                    this.noiseGate.gain.value = level * 10; // Плавное увеличение
-                } else {
-                    this.noiseGate.gain.value = 1; // Нормальный уровень
-                }
-            }
-
-            disconnect() {
-                this.highPass.disconnect();
-                this.lowPass.disconnect();
-                this.compressor.disconnect();
-                this.noiseGate.disconnect();
-                this.analyser.disconnect();
+                await audio.play();
+            } catch (error) {
+                console.error('Ошибка воспроизведения:', error);
+                isPlaying = false;
+                playNextInQueue();
             }
         }
 
         // Инициализация WebSocket соединения
         function initSocket() {
-            socket = io();
+            socket = io({
+                transports: ['websocket', 'polling']
+            });
 
             socket.on('connect', () => {
                 console.log('✅ Подключено к серверу');
@@ -323,8 +301,20 @@
             });
 
             socket.on('audio-data', (data) => {
-                // Воспроизведение входящего аудио
-                playAudio(data.audio);
+                // Добавляем в очередь воспроизведения
+                if (data && data.audio) {
+                    try {
+                        const binaryString = atob(data.audio);
+                        const bytes = new Uint8Array(binaryString.length);
+                        for (let i = 0; i < binaryString.length; i++) {
+                            bytes[i] = binaryString.charCodeAt(i);
+                        }
+                        audioQueue.push(bytes);
+                        playNextInQueue();
+                    } catch (error) {
+                        console.error('Ошибка обработки аудио:', error);
+                    }
+                }
             });
 
             socket.on('disconnect', () => {
@@ -338,7 +328,7 @@
             const roomId = document.getElementById('roomId').value.trim() || 'general';
             
             try {
-                // Запрашиваем доступ к микрофону с шумоподавлением
+                // Запрашиваем доступ к микрофону
                 const constraints = {
                     audio: {
                         echoCancellation: true,
@@ -351,19 +341,40 @@
                 
                 mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
                 
-                // Инициализируем Web Audio API
+                // Создаем AudioContext для обработки
                 audioContext = new (window.AudioContext || window.webkitAudioContext)({
                     sampleRate: 48000
                 });
                 
-                // Создаем шумоподавитель
-                noiseFilter = new NoiseSuppressor(audioContext);
-                
-                // Подключаем микрофон к обработке
                 const source = audioContext.createMediaStreamSource(mediaStream);
-                const analyser = noiseFilter.connect(source);
                 
-                // Создаем поток для отправки
+                // Создаем фильтры для шумоподавления
+                const highPass = audioContext.createBiquadFilter();
+                highPass.type = 'highpass';
+                highPass.frequency.value = 100; // Убираем низкочастотный гул
+                
+                const lowPass = audioContext.createBiquadFilter();
+                lowPass.type = 'lowpass';
+                lowPass.frequency.value = 8000; // Убираем высокочастотный шум
+                
+                const compressor = audioContext.createDynamicsCompressor();
+                compressor.threshold.value = -50;
+                compressor.knee.value = 40;
+                compressor.ratio.value = 12;
+                compressor.attack.value = 0.003;
+                compressor.release.value = 0.25;
+                
+                // Анализатор для отображения уровня
+                const analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                
+                // Цепочка: source -> highPass -> lowPass -> compressor -> analyser -> destination
+                source.connect(highPass);
+                highPass.connect(lowPass);
+                lowPass.connect(compressor);
+                compressor.connect(analyser);
+                
+                // Создаем выходной поток
                 const destination = audioContext.createMediaStreamDestination();
                 analyser.connect(destination);
                 
@@ -377,9 +388,11 @@
                 
                 isConnected = true;
                 
-                // Запускаем мониторинг и отправку аудио
-                startAudioMonitoring(analyser);
-                startAudioSending(destination.stream);
+                // Запускаем мониторинг уровня
+                startVolumeMonitoring(analyser);
+                
+                // Запускаем запись и отправку аудио
+                startRecording(destination.stream);
                 
             } catch (error) {
                 console.error('Ошибка:', error);
@@ -389,29 +402,23 @@
         }
 
         // Мониторинг уровня звука
-        function startAudioMonitoring(analyser) {
+        function startVolumeMonitoring(analyser) {
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             
             function updateLevel() {
                 if (!isConnected) return;
                 
-                analyser.getByteTimeDomainData(dataArray);
+                analyser.getByteFrequencyData(dataArray);
                 
-                // Вычисляем RMS (среднеквадратичное значение)
+                // Вычисляем средний уровень
                 let sum = 0;
                 for (let i = 0; i < dataArray.length; i++) {
-                    const value = (dataArray[i] - 128) / 128;
-                    sum += value * value;
+                    sum += dataArray[i];
                 }
-                const rms = Math.sqrt(sum / dataArray.length);
+                const average = sum / dataArray.length;
                 
-                // Обновляем шумовой гейт
-                if (noiseFilter) {
-                    noiseFilter.updateNoiseGate(rms);
-                }
-                
-                // Отображаем уровень
-                const percentage = Math.min(100, Math.round(rms * 200));
+                // Нормализуем в проценты
+                const percentage = Math.round((average / 255) * 100);
                 document.getElementById('volumeLevel').textContent = percentage + '%';
                 
                 requestAnimationFrame(updateLevel);
@@ -420,62 +427,60 @@
             updateLevel();
         }
 
-        // Отправка аудио
-        function startAudioSending(stream) {
-            const audioTrack = stream.getAudioTracks()[0];
-            
-            const sendInterval = setInterval(() => {
-                if (!isConnected || isMuted) return;
-                
-                // Здесь можно добавить дополнительную обработку
-                // Но WebRTC и так оптимизирует передачу
-                
-            }, 100);
-            
-            // Альтернатива: отправляем через MediaRecorder для лучшего контроля
-            const mediaRecorder = new MediaRecorder(stream, {
+        // Запись и отправка аудио
+        function startRecording(stream) {
+            const options = {
                 mimeType: 'audio/webm;codecs=opus',
                 audioBitsPerSecond: 32000
-            });
+            };
+            
+            // Проверяем поддержку формата
+            if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+                options.mimeType = 'audio/webm';
+            }
+            
+            mediaRecorder = new MediaRecorder(stream, options);
             
             mediaRecorder.ondataavailable = (event) => {
                 if (event.data.size > 0 && !isMuted && isConnected) {
                     const reader = new FileReader();
                     reader.onloadend = () => {
                         const base64data = reader.result.split(',')[1];
-                        socket.emit('audio-data', base64data);
+                        if (base64data) {
+                            socket.emit('audio-data', base64data);
+                        }
                     };
                     reader.readAsDataURL(event.data);
                 }
             };
             
-            mediaRecorder.start(100); // Отправляем каждые 100мс
-        }
-
-        // Воспроизведение аудио
-        function playAudio(base64Data) {
-            // Простое воспроизведение полученных аудио данных
-            // В реальном приложении лучше использовать WebRTC peer connections
-            try {
-                const audio = new Audio('data:audio/webm;base64,' + base64Data);
-                audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
-            } catch (error) {
-                console.error('Ошибка декодирования аудио:', error);
-            }
+            mediaRecorder.onerror = (error) => {
+                console.error('Ошибка записи:', error);
+            };
+            
+            // Записываем и отправляем чанки каждые 100мс
+            mediaRecorder.start(100);
+            console.log('🎙️ Запись начата');
         }
 
         // Переключение мута
         function toggleMute() {
             if (!isConnected) return;
             
+            isMuted = !isMuted;
             socket.emit('toggle-mute');
+            updateMuteButton();
+            
+            // Визуальная обратная связь
+            document.getElementById('noiseStatus').textContent = 
+                isMuted ? '🔇 Микрофон выключен' : '🎧 Шумоподавление: АКТИВНО';
         }
 
         // Обновление кнопки мута
         function updateMuteButton() {
             const muteBtn = document.getElementById('muteBtn');
             if (isMuted) {
-                muteBtn.textContent = '🔇 Включен мут';
+                muteBtn.textContent = '🔇 Микрофон выключен';
                 muteBtn.classList.add('btn-muted');
             } else {
                 muteBtn.textContent = '🔊 Микрофон';
@@ -502,12 +507,12 @@
 
         // Выход из комнаты
         function leaveRoom() {
-            if (mediaStream) {
-                mediaStream.getTracks().forEach(track => track.stop());
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
             }
             
-            if (noiseFilter) {
-                noiseFilter.disconnect();
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
             }
             
             if (audioContext) {
@@ -519,6 +524,8 @@
             }
             
             isConnected = false;
+            audioQueue = [];
+            isPlaying = false;
             
             document.getElementById('joinScreen').classList.remove('hidden');
             document.getElementById('chatScreen').classList.add('hidden');
