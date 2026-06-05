@@ -1,25 +1,10 @@
 const express = require('express');
-const https = require('https');
 const http = require('http');
-const fs = require('fs');
 const path = require('path');
 const { Server } = require('socket.io');
 
-// Попробуй загрузить SSL сертификаты, если нет - используем HTTP
-let server;
-try {
-    const sslOptions = {
-        key: fs.readFileSync('key.pem'),
-        cert: fs.readFileSync('cert.pem')
-    };
-    server = https.createServer(sslOptions, app);
-    console.log('🔒 HTTPS сервер запущен');
-} catch (e) {
-    const app = express();
-    server = http.createServer(app);
-    console.log('⚠️ HTTP сервер (для продакшена нужен HTTPS)');
-}
-
+const app = express();
+const server = http.createServer(app);
 const io = new Server(server, {
     cors: {
         origin: "*",
@@ -74,10 +59,9 @@ io.on('connection', (socket) => {
         console.log(`📢 ${socket.userName} присоединился к комнате ${roomId}`);
     });
 
-    // Пересылка аудио данных (уже обработанных шумоподавлением)
+    // Пересылка аудио данных
     socket.on('audio-data', (data) => {
         if (socket.roomId && !socket.isMuted) {
-            // Отправляем аудио всем в комнате кроме отправителя
             socket.to(socket.roomId).emit('audio-data', {
                 userId: socket.id,
                 audio: data
@@ -95,7 +79,6 @@ io.on('connection', (socket) => {
                 userRoom.get(socket.id).muted = socket.isMuted;
             }
 
-            // Отправляем обновленный статус
             io.to(socket.roomId).emit('user-mute-update', {
                 userId: socket.id,
                 muted: socket.isMuted
@@ -112,11 +95,9 @@ io.on('connection', (socket) => {
         if (socket.roomId && rooms.has(socket.roomId)) {
             rooms.get(socket.roomId).delete(socket.id);
             
-            // Если комната пуста - удаляем её
             if (rooms.get(socket.roomId).size === 0) {
                 rooms.delete(socket.roomId);
             } else {
-                // Обновляем список пользователей для оставшихся
                 const usersList = Array.from(rooms.get(socket.roomId).values());
                 io.to(socket.roomId).emit('users-update', usersList);
             }
@@ -126,8 +107,8 @@ io.on('connection', (socket) => {
     });
 });
 
+// Для Render используем PORT из переменных окружения
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log(`🚀 Сервер запущен на порту ${PORT}`);
-    console.log(`📡 Откройте http://localhost:${PORT} в браузере`);
 });
