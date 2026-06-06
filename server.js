@@ -1,104 +1,121 @@
 const express = require('express');
 const http = require('http');
-const path = require('path');
 const { Server } = require('socket.io');
+const { v4: uuidv4 } = require('uuid');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] },
-    maxHttpBufferSize: 1e8
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
 });
 
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, 'public')));
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
+// Rooms: { roomId: { users: Map<socketId, { id, name, muted }> } }
 const rooms = new Map();
 
+function getRoomUsers(roomId) {
+  if (!rooms.has(roomId)) return [];
+  return Array.from(rooms.get(roomId).users.values());
+}
+
 io.on('connection', (socket) => {
-    console.log(`👤 ${socket.id}`);
+  console.log(`[+] Connected: ${socket.id}`);
 
-    socket.on('join-room', ({ roomId, userName }) => {
-        socket.join(roomId);
-        socket.roomId = roomId;
-        socket.userName = userName || 'Гость';
-        socket.isMuted = false;
+  // Join room
+  socket.on('join-room', ({ roomId, userName }) => {
+    const userId = socket.id;
+    const name = (userName || 'Guest').slice(0, 24);
 
-        if (!rooms.has(roomId)) rooms.set(roomId, new Map());
-        
-        rooms.get(roomId).set(socket.id, {
-            id: socket.id,
-            name: socket.userName,
-            muted: false
-        });
+    if (!rooms.has(roomId)) {
+      rooms.set(roomId, { users: new Map() });
+    }
 
-        // Говорим всем в комнате о новом пользователе
-        socket.to(roomId).emit('user-joined', {
-            id: socket.id,
-            name: socket.userName
-        });
+    const room = rooms.get(roomId);
+    const user = { id: userId, name, muted: false };
+    room.users.set(userId, user);
 
-        io.to(roomId).emit('users-update', 
-            Array.from(rooms.get(roomId).values())
-        );
+    socket.join(roomId);
+    socket.data.roomId = roomId;
+    socket.data.userId = userId;
+
+    // Tell the new user who else is in the room
+    const others = getRoomUsers(roomId).filter(u => u.id !== userId);
+    socket.emit('room-joined', { userId, roomId, users: others });
+
+    // Tell others a new user joined
+    socket.to(roomId).emit('user-joined', user);
+
+    console.log(`[Room ${roomId}] ${name} joined. Total: ${room.users.size}`);
+  });
+
+  // WebRTC signaling
+  socket.on('offer', ({ to, offer }) => {
+    socket.to(to).emit('offer', { from: socket.id, offer });
+  });
+
+  socket.on('answer', ({ to, answer }) => {
+    socket.to(to).emit('answer', { from: socket.id, answer });
+  });
+
+  socket.on('ice-candidate', ({ to, candidate }) => {
+    socket.to(to).emit('ice-candidate', { from: socket.id, candidate });
+  });
+
+  // Mute state
+  socket.on('toggle-mute', ({ muted }) => {
+    const { roomId, userId } = socket.data;
+    if (!roomId || !rooms.has(roomId)) return;
+
+    const room = rooms.get(roomId);
+    const user = room.users.get(userId);
+    if (user) {
+      user.muted = muted;
+      io.to(roomId).emit('user-mute-changed', { userId, muted });
+    }
+  });
+
+  // Chat message
+  socket.on('chat-message', ({ text }) => {
+    const { roomId, userId } = socket.data;
+    if (!roomId || !rooms.has(roomId)) return;
+    const room = rooms.get(roomId);
+    const user = room.users.get(userId);
+    if (!user || !text || text.length > 500) return;
+
+    io.to(roomId).emit('chat-message', {
+      from: userId,
+      name: user.name,
+      text: text.trim(),
+      ts: Date.now()
     });
+  });
 
-    // WebRTC сигналинг
-    socket.on('offer', ({ offer, to }) => {
-        socket.to(to).emit('offer', {
-            offer: offer,
-            from: socket.id,
-            name: socket.userName
-        });
-    });
+  // Disconnect
+  socket.on('disconnect', () => {
+    const { roomId, userId } = socket.data;
+    if (roomId && rooms.has(roomId)) {
+      const room = rooms.get(roomId);
+      const user = room.users.get(userId);
+      room.users.delete(userId);
 
-    socket.on('answer', ({ answer, to }) => {
-        socket.to(to).emit('answer', {
-            answer: answer,
-            from: socket.id
-        });
-    });
-
-    socket.on('ice-candidate', ({ candidate, to }) => {
-        socket.to(to).emit('ice-candidate', {
-            candidate: candidate,
-            from: socket.id
-        });
-    });
-
-    socket.on('toggle-mute', () => {
-        if (!socket.roomId || !rooms.has(socket.roomId)) return;
-        
-        socket.isMuted = !socket.isMuted;
-        const user = rooms.get(socket.roomId).get(socket.id);
-        if (user) user.muted = socket.isMuted;
-
-        io.to(socket.roomId).emit('user-mute-update', {
-            userId: socket.id,
-            muted: socket.isMuted
-        });
-        socket.emit('mute-status', socket.isMuted);
-    });
-
-    socket.on('disconnect', () => {
-        if (!socket.roomId || !rooms.has(socket.roomId)) return;
-        
-        rooms.get(socket.roomId).delete(socket.id);
-        
-        if (rooms.get(socket.roomId).size === 0) {
-            rooms.delete(socket.roomId);
-        } else {
-            io.to(socket.roomId).emit('users-update',
-                Array.from(rooms.get(socket.roomId).values())
-            );
-        }
-        
-        socket.to(socket.roomId).emit('user-left', socket.id);
-    });
+      if (room.users.size === 0) {
+        rooms.delete(roomId);
+        console.log(`[Room ${roomId}] Empty, removed.`);
+      } else {
+        socket.to(roomId).emit('user-left', { userId });
+        console.log(`[Room ${roomId}] ${user?.name} left. Remaining: ${room.users.size}`);
+      }
+    }
+    console.log(`[-] Disconnected: ${socket.id}`);
+  });
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Порт ${PORT}`));
+server.listen(PORT, () => {
+  console.log(`\n🎙  Voice Chat server running on http://localhost:${PORT}\n`);
+});
