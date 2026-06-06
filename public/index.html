@@ -1,376 +1,974 @@
 <!DOCTYPE html>
 <html lang="ru">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Голосовой чат</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            color: white;
-        }
-        .container {
-            background: rgba(255,255,255,0.1);
-            backdrop-filter: blur(20px);
-            border-radius: 30px;
-            padding: 40px;
-            width: 90%;
-            max-width: 500px;
-        }
-        h1 { text-align: center; margin-bottom: 30px; font-weight: 300; }
-        .hidden { display: none !important; }
-        .input-group { margin-bottom: 20px; }
-        label { display: block; margin-bottom: 8px; opacity: 0.9; font-size: 0.9em; }
-        input {
-            width: 100%; padding: 15px;
-            border: 2px solid rgba(255,255,255,0.2);
-            border-radius: 15px;
-            background: rgba(255,255,255,0.1);
-            color: white; font-size: 1em; outline: none;
-        }
-        input:focus { border-color: white; background: rgba(255,255,255,0.2); }
-        .btn {
-            width: 100%; padding: 15px; border: none;
-            border-radius: 15px; font-size: 1.1em;
-            font-weight: 600; cursor: pointer;
-            text-transform: uppercase; letter-spacing: 1px;
-        }
-        .btn-primary { background: white; color: #667eea; }
-        .btn-primary:hover { transform: translateY(-2px); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
-        .controls { display: flex; gap: 15px; margin-top: 20px; }
-        .btn-control {
-            flex: 1; padding: 12px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-radius: 15px;
-            background: rgba(255,255,255,0.1);
-            color: white; cursor: pointer;
-            font-weight: 500; text-align: center;
-        }
-        .btn-control:hover { background: rgba(255,255,255,0.2); }
-        .btn-muted { background: rgba(255,0,0,0.5) !important; }
-        .users-list { margin-top: 20px; max-height: 300px; overflow-y: auto; }
-        .user-item {
-            padding: 10px 15px; margin: 5px 0;
-            background: rgba(255,255,255,0.1);
-            border-radius: 10px;
-            display: flex; align-items: center; gap: 10px;
-        }
-        .status-dot {
-            width: 12px; height: 12px;
-            border-radius: 50%;
-            background: #4CAF50;
-        }
-        .status-muted { background: #f44336; }
-        .volume-bar {
-            margin: 15px 0; padding: 10px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 10px; text-align: center;
-        }
-        .volume-fill {
-            height: 5px; background: #4CAF50;
-            border-radius: 3px; width: 0%;
-            margin-top: 5px; transition: width 0.1s;
-        }
-        .status-text {
-            margin: 10px 0; padding: 8px;
-            background: rgba(0,0,0,0.2);
-            border-radius: 8px;
-            font-size: 0.9em; text-align: center;
-        }
-        .error-message {
-            color: #ff6b6b; margin-top: 10px;
-            text-align: center; font-size: 0.9em;
-        }
-    </style>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>VoiceRoom</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #1a1a24;
+    --border: #2a2a3a;
+    --accent: #7c6af7;
+    --accent2: #4ecdc4;
+    --danger: #ff4757;
+    --text: #e8e8f0;
+    --text2: #888899;
+    --green: #2ecc71;
+    --radius: 12px;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    height: 100vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── LOBBY ── */
+  #lobby {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    background: radial-gradient(ellipse at 60% 40%, #1a1040 0%, var(--bg) 65%);
+  }
+  .lobby-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 48px 40px;
+    width: 400px;
+    max-width: 95vw;
+    box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(124,106,247,.1);
+  }
+  .lobby-card h1 {
+    font-size: 2rem;
+    font-weight: 800;
+    letter-spacing: -1px;
+    margin-bottom: 6px;
+    background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .lobby-card p {
+    color: var(--text2);
+    font-size: .85rem;
+    margin-bottom: 32px;
+    font-family: 'Space Mono', monospace;
+  }
+  .field {
+    margin-bottom: 16px;
+  }
+  .field label {
+    display: block;
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text2);
+    margin-bottom: 8px;
+  }
+  .field input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: .9rem;
+    padding: 12px 16px;
+    outline: none;
+    transition: border .2s;
+  }
+  .field input:focus { border-color: var(--accent); }
+  .btn-join {
+    width: 100%;
+    margin-top: 8px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    padding: 14px;
+    font-family: 'Syne', sans-serif;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    letter-spacing: .5px;
+    transition: background .2s, transform .1s;
+  }
+  .btn-join:hover { background: #9380ff; }
+  .btn-join:active { transform: scale(.98); }
+  .or-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 20px 0;
+    color: var(--text2);
+    font-size: .75rem;
+  }
+  .or-row::before, .or-row::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── MAIN APP ── */
+  #app { display: none; flex-direction: column; height: 100vh; }
+
+  /* Header */
+  .header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .header-logo { font-weight: 800; font-size: 1.1rem; letter-spacing: -0.5px; color: var(--accent); }
+  .room-badge {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-family: 'Space Mono', monospace;
+    font-size: .75rem;
+    color: var(--text2);
+    cursor: pointer;
+    user-select: none;
+    transition: border .2s;
+  }
+  .room-badge:hover { border-color: var(--accent); color: var(--text); }
+  .header-spacer { flex: 1; }
+  .conn-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: .75rem;
+    color: var(--text2);
+  }
+  .conn-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--text2);
+    transition: background .3s;
+  }
+  .conn-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
+
+  /* Body */
+  .body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* Sidebar – participants */
+  .sidebar {
+    width: 240px;
+    flex-shrink: 0;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .sidebar-title {
+    padding: 16px 18px 10px;
+    font-size: .7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text2);
+    border-bottom: 1px solid var(--border);
+  }
+  #participants-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 10px 0;
+  }
+  .participant {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    transition: background .15s;
+  }
+  .participant:hover { background: var(--surface2); }
+  .p-avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: .8rem;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .p-avatar .speaking-ring {
+    position: absolute;
+    inset: -3px;
+    border-radius: 50%;
+    border: 2px solid var(--green);
+    opacity: 0;
+    transition: opacity .2s;
+    animation: none;
+  }
+  .p-avatar.speaking .speaking-ring {
+    opacity: 1;
+    animation: pulse 1s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%,100% { transform: scale(1); opacity: .8; }
+    50% { transform: scale(1.15); opacity: 1; }
+  }
+  .p-info { flex: 1; min-width: 0; }
+  .p-name {
+    font-size: .85rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .p-name.you::after {
+    content: ' (вы)';
+    color: var(--text2);
+    font-weight: 400;
+    font-size: .75rem;
+  }
+  .p-mute-icon {
+    font-size: .85rem;
+    color: var(--danger);
+    flex-shrink: 0;
+  }
+  .p-mute-icon.active { display: block; }
+  .p-mute-icon:not(.active) { display: none; }
+
+  /* Volume meter */
+  .vol-bar-wrap {
+    width: 3px;
+    height: 20px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    flex-shrink: 0;
+  }
+  .vol-bar {
+    width: 100%;
+    height: 0%;
+    background: var(--green);
+    border-radius: 3px;
+    transition: height .05s;
+    margin-top: auto;
+  }
+
+  /* Main area */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  /* Chat */
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    scroll-behavior: smooth;
+  }
+  #messages::-webkit-scrollbar { width: 4px; }
+  #messages::-webkit-scrollbar-track { background: transparent; }
+  #messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+
+  .msg {
+    display: flex;
+    flex-direction: column;
+    max-width: 70%;
+    gap: 3px;
+  }
+  .msg.own { align-self: flex-end; align-items: flex-end; }
+  .msg .meta {
+    font-size: .7rem;
+    color: var(--text2);
+    font-family: 'Space Mono', monospace;
+    padding: 0 4px;
+  }
+  .msg .bubble {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px 14px 14px 4px;
+    padding: 10px 14px;
+    font-size: .9rem;
+    line-height: 1.5;
+    word-break: break-word;
+  }
+  .msg.own .bubble {
+    background: var(--accent);
+    border-color: transparent;
+    border-radius: 14px 14px 4px 14px;
+  }
+
+  .sys-msg {
+    align-self: center;
+    font-size: .75rem;
+    color: var(--text2);
+    font-family: 'Space Mono', monospace;
+    background: var(--surface2);
+    padding: 4px 12px;
+    border-radius: 20px;
+  }
+
+  /* Input bar */
+  .input-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  #chat-input {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    font-size: .9rem;
+    padding: 10px 16px;
+    outline: none;
+    transition: border .2s;
+  }
+  #chat-input:focus { border-color: var(--accent); }
+
+  .ctrl-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 1.1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .2s, border-color .2s, transform .1s;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .ctrl-btn:hover { background: var(--border); }
+  .ctrl-btn:active { transform: scale(.93); }
+  .ctrl-btn.muted {
+    background: rgba(255,71,87,.15);
+    border-color: var(--danger);
+    color: var(--danger);
+  }
+  .ctrl-btn.noise-on {
+    background: rgba(78,205,196,.1);
+    border-color: var(--accent2);
+    color: var(--accent2);
+  }
+  .ctrl-btn-label {
+    position: absolute;
+    bottom: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: .6rem;
+    white-space: nowrap;
+    color: var(--text2);
+    font-family: 'Space Mono', monospace;
+  }
+  .ctrl-wrap { position: relative; padding-bottom: 18px; }
+
+  .leave-btn {
+    width: 44px; height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: var(--danger);
+    color: #fff;
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background .2s, transform .1s;
+    flex-shrink: 0;
+    position: relative;
+  }
+  .leave-btn:hover { background: #ff6b6b; }
+  .leave-btn:active { transform: scale(.93); }
+
+  /* Toast */
+  #toast {
+    position: fixed;
+    bottom: 80px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px 20px;
+    font-size: .85rem;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .3s, transform .3s;
+    z-index: 999;
+    white-space: nowrap;
+  }
+  #toast.show {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  @media (max-width: 600px) {
+    .sidebar { width: 180px; }
+    .msg { max-width: 85%; }
+  }
+</style>
 </head>
 <body>
-    <div class="container">
-        <div id="joinScreen">
-            <h1>🎙️ Голосовой Чат</h1>
-            <div class="input-group">
-                <label>Ваше имя:</label>
-                <input type="text" id="userName" placeholder="Введите имя" value="User">
-            </div>
-            <div class="input-group">
-                <label>ID комнаты:</label>
-                <input type="text" id="roomId" placeholder="Введите ID комнаты" value="general">
-            </div>
-            <button id="joinBtn" class="btn btn-primary" onclick="chatApp.joinRoom()">
-                Присоединиться
-            </button>
-            <div id="errorMessage" class="error-message"></div>
-        </div>
 
-        <div id="chatScreen" class="hidden">
-            <h1>🎙️ <span id="currentRoom">general</span></h1>
-            
-            <div class="volume-bar">
-                🔊 Ваш микрофон
-                <div id="volumeFill" class="volume-fill"></div>
-            </div>
-            
-            <div id="connectionStatus" class="status-text">
-                🔗 Подключение...
-            </div>
+<!-- ── LOBBY ── -->
+<div id="lobby">
+  <div class="lobby-card">
+    <h1>VoiceRoom</h1>
+    <p>// голосовой чат с шумоподавлением</p>
 
-            <div class="controls">
-                <button id="muteBtn" class="btn-control" onclick="chatApp.toggleMute()">
-                    🔊 Микрофон
-                </button>
-                <button class="btn-control" onclick="chatApp.leaveRoom()">
-                    🚪 Выйти
-                </button>
-            </div>
+    <div class="field">
+      <label>Ваше имя</label>
+      <input id="inp-name" type="text" placeholder="Введите имя" maxlength="24" autocomplete="off"/>
+    </div>
+    <div class="field">
+      <label>ID комнаты</label>
+      <input id="inp-room" type="text" placeholder="room-1234" maxlength="32" autocomplete="off"/>
+    </div>
+    <button class="btn-join" onclick="joinLobby()">Войти в комнату</button>
+    <div class="or-row">или</div>
+    <button class="btn-join" style="background:var(--surface2);border:1px solid var(--border);color:var(--text2)" onclick="createRoom()">Создать новую комнату</button>
+  </div>
+</div>
 
-            <div id="usersList" class="users-list">
-                <h3>👥 Участники:</h3>
-            </div>
-        </div>
+<!-- ── APP ── -->
+<div id="app">
+  <div class="header">
+    <span class="header-logo">🎙 VoiceRoom</span>
+    <span class="room-badge" id="room-id-badge" title="Нажмите чтобы скопировать">—</span>
+    <div class="header-spacer"></div>
+    <div class="conn-status">
+      <div class="conn-dot" id="conn-dot"></div>
+      <span id="conn-label">Подключение...</span>
+    </div>
+  </div>
+
+  <div class="body">
+    <div class="sidebar">
+      <div class="sidebar-title">Участники <span id="p-count"></span></div>
+      <div id="participants-list"></div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        const chatApp = {
-            socket: null,
-            localStream: null,
-            peerConnections: {},
-            isMuted: false,
-            isConnected: false,
-            audioContext: null,
+    <div class="main">
+      <div id="messages"></div>
+      <div class="input-bar">
+        <div class="ctrl-wrap">
+          <button class="ctrl-btn" id="mute-btn" onclick="toggleMute()" title="Микрофон">🎤</button>
+          <span class="ctrl-btn-label">микрофон</span>
+        </div>
+        <div class="ctrl-wrap">
+          <button class="ctrl-btn noise-on" id="noise-btn" onclick="toggleNoise()" title="Шумоподавление">🔇</button>
+          <span class="ctrl-btn-label">шумоподав.</span>
+        </div>
+        <input id="chat-input" type="text" placeholder="Написать сообщение..." maxlength="500" autocomplete="off"/>
+        <button class="ctrl-btn" onclick="sendChat()" title="Отправить" style="border-color:var(--accent);color:var(--accent)">➤</button>
+        <div class="ctrl-wrap">
+          <button class="leave-btn" onclick="leaveRoom()" title="Покинуть">✕</button>
+          <span class="ctrl-btn-label" style="color:var(--danger)">выйти</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-            init() {
-                this.socket = io();
+<div id="toast"></div>
 
-                this.socket.on('users-update', (users) => this.renderUsers(users));
+<script src="/socket.io/socket.io.js"></script>
+<script>
+// ═══════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════
+const ICE_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' }
+];
 
-                this.socket.on('user-joined', (user) => {
-                    console.log('👤 Зашёл:', user.name);
-                    this.createPeerConnection(user.id, true);
-                });
+// ═══════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════
+let socket = null;
+let localStream = null;
+let myId = null;
+let myName = '';
+let roomId = '';
+let muted = false;
+let noiseEnabled = true;
 
-                this.socket.on('user-left', (userId) => {
-                    console.log('👋 Вышел:', userId);
-                    if (this.peerConnections[userId]) {
-                        this.peerConnections[userId].close();
-                        delete this.peerConnections[userId];
-                    }
-                });
+// peers: Map<socketId, { pc: RTCPeerConnection, analyser: AnalyserNode }>
+const peers = new Map();
+// users: Map<socketId, { id, name, muted }>
+const users = new Map();
 
-                this.socket.on('offer', async ({ offer, from }) => {
-                    console.log('📞 Входящий звонок');
-                    const pc = this.createPeerConnection(from, false);
-                    await pc.setRemoteDescription(offer);
-                    const answer = await pc.createAnswer();
-                    await pc.setLocalDescription(answer);
-                    this.socket.emit('answer', { answer, to: from });
-                });
+// Noise suppression pipeline
+let audioCtx = null;
+let sourceNode = null;
+let gainNode = null;
+let destinationNode = null;
+let processedStream = null;
 
-                this.socket.on('answer', async ({ answer, from }) => {
-                    console.log('✅ Ответ получен');
-                    const pc = this.peerConnections[from];
-                    if (pc) {
-                        await pc.setRemoteDescription(answer);
-                    }
-                });
+// Volume metering
+const meterAnimFrames = new Map();
 
-                this.socket.on('ice-candidate', async ({ candidate, from }) => {
-                    const pc = this.peerConnections[from];
-                    if (pc && candidate) {
-                        await pc.addIceCandidate(candidate);
-                    }
-                });
+// ═══════════════════════════════════════════════
+//  LOBBY
+// ═══════════════════════════════════════════════
+function createRoom() {
+  const id = 'room-' + Math.random().toString(36).slice(2, 8);
+  document.getElementById('inp-room').value = id;
+}
 
-                this.socket.on('user-mute-update', (data) => {
-                    this.updateUserMute(data.userId, data.muted);
-                });
+async function joinLobby() {
+  const name = document.getElementById('inp-name').value.trim();
+  const room = document.getElementById('inp-room').value.trim();
+  if (!name) return showToast('Введите имя');
+  if (!room) return showToast('Введите ID комнаты');
 
-                this.socket.on('mute-status', (muted) => {
-                    this.isMuted = muted;
-                    this.updateMuteBtn();
-                });
-            },
+  myName = name;
+  roomId = room;
 
-            createPeerConnection(userId, isInitiator) {
-                if (this.peerConnections[userId]) return;
+  try {
+    await initAudio();
+    initSocket();
+    document.getElementById('lobby').style.display = 'none';
+    document.getElementById('app').style.display = 'flex';
+    document.getElementById('room-id-badge').textContent = roomId;
+    document.getElementById('room-id-badge').onclick = copyRoomId;
+  } catch(e) {
+    showToast('Ошибка микрофона: ' + e.message);
+    console.error(e);
+  }
+}
 
-                const pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                });
+// ═══════════════════════════════════════════════
+//  AUDIO + NOISE SUPPRESSION
+// ═══════════════════════════════════════════════
+async function initAudio() {
+  // Request mic with browser built-in noise suppression and echo cancellation
+  const constraints = {
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      sampleRate: 48000,
+      channelCount: 1
+    }
+  };
+  localStream = await navigator.mediaDevices.getUserMedia(constraints);
+  await buildAudioPipeline();
+}
 
-                this.peerConnections[userId] = pc;
+async function buildAudioPipeline() {
+  if (audioCtx) { audioCtx.close(); }
 
-                // Добавляем локальный стрим
-                if (this.localStream) {
-                    this.localStream.getTracks().forEach(track => {
-                        pc.addTrack(track, this.localStream);
-                    });
-                }
+  audioCtx = new AudioContext({ sampleRate: 48000 });
+  sourceNode = audioCtx.createMediaStreamSource(localStream);
+  gainNode = audioCtx.createGain();
+  gainNode.gain.value = 1.2;
 
-                // Получаем удалённый стрим
-                pc.ontrack = (event) => {
-                    console.log('📡 Получен аудио поток');
-                    const audio = new Audio();
-                    audio.srcObject = event.streams[0];
-                    audio.play().catch(e => console.log('Ошибка воспроизведения:', e));
-                };
+  // ScriptProcessor for software noise gate (suppresses low-level noise below threshold)
+  const bufSize = 2048;
+  const noiseGateNode = audioCtx.createScriptProcessor(bufSize, 1, 1);
+  let noiseFloor = 0;
+  let gateOpen = false;
+  let holdCounter = 0;
+  const HOLD_FRAMES = 8;
+  const ATTACK  = 0.15;
+  const RELEASE = 0.05;
+  let gateGain = 0;
 
-                // ICE кандидаты
-                pc.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        this.socket.emit('ice-candidate', {
-                            candidate: event.candidate,
-                            to: userId
-                        });
-                    }
-                };
+  noiseGateNode.onaudioprocess = (e) => {
+    const input  = e.inputBuffer.getChannelData(0);
+    const output = e.outputBuffer.getChannelData(0);
 
-                // Создаём offer если нужно
-                if (isInitiator) {
-                    pc.createOffer({
-                        offerToReceiveAudio: true
-                    }).then(offer => {
-                        return pc.setLocalDescription(offer);
-                    }).then(() => {
-                        this.socket.emit('offer', {
-                            offer: pc.localDescription,
-                            to: userId
-                        });
-                    }).catch(e => console.error('Ошибка offer:', e));
-                }
-            },
+    // RMS
+    let sum = 0;
+    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    const rms = Math.sqrt(sum / input.length);
 
-            async joinRoom() {
-                const userName = document.getElementById('userName').value.trim() || 'User';
-                const roomId = document.getElementById('roomId').value.trim() || 'general';
-                const joinBtn = document.getElementById('joinBtn');
+    // Adaptive noise floor
+    noiseFloor = noiseFloor * 0.999 + rms * 0.001;
+    const threshold = noiseEnabled ? Math.max(noiseFloor * 3.5, 0.006) : 0;
 
-                try {
-                    joinBtn.disabled = true;
-                    joinBtn.textContent = 'Подключение...';
+    if (rms > threshold) {
+      gateOpen = true;
+      holdCounter = HOLD_FRAMES;
+    } else {
+      if (holdCounter > 0) holdCounter--;
+      else gateOpen = false;
+    }
 
-                    // Получаем микрофон
-                    this.localStream = await navigator.mediaDevices.getUserMedia({
-                        audio: true
-                    });
+    const targetGain = (gateOpen || !noiseEnabled) ? 1 : 0;
+    for (let i = 0; i < output.length; i++) {
+      gateGain += (targetGain - gateGain) * (targetGain > gateGain ? ATTACK : RELEASE);
+      output[i] = input[i] * gateGain;
+    }
+  };
 
-                    // Для визуализации
-                    this.audioContext = new AudioContext();
-                    const source = this.audioContext.createMediaStreamSource(this.localStream);
-                    const analyser = this.audioContext.createAnalyser();
-                    analyser.fftSize = 256;
-                    source.connect(analyser);
+  destinationNode = audioCtx.createMediaStreamDestination();
+  sourceNode.connect(noiseGateNode);
+  noiseGateNode.connect(gainNode);
+  gainNode.connect(destinationNode);
 
-                    // Входим в комнату
-                    this.socket.emit('join-room', { roomId, userName });
+  processedStream = destinationNode.stream;
+}
 
-                    document.getElementById('joinScreen').classList.add('hidden');
-                    document.getElementById('chatScreen').classList.remove('hidden');
-                    document.getElementById('currentRoom').textContent = roomId;
-                    document.getElementById('connectionStatus').textContent = '🟢 Онлайн';
-                    
-                    this.isConnected = true;
-                    this.startVolume(analyser);
+function getOutboundStream() {
+  return processedStream || localStream;
+}
 
-                } catch (error) {
-                    document.getElementById('errorMessage').textContent = 'Ошибка: ' + error.message;
-                    joinBtn.disabled = false;
-                    joinBtn.textContent = 'Присоединиться';
-                }
-            },
+// ═══════════════════════════════════════════════
+//  SOCKET.IO
+// ═══════════════════════════════════════════════
+function initSocket() {
+  socket = io();
 
-            startVolume(analyser) {
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                const fill = document.getElementById('volumeFill');
-                
-                const update = () => {
-                    if (!this.isConnected) return;
-                    analyser.getByteTimeDomainData(dataArray);
-                    let max = 0;
-                    for (let i = 0; i < dataArray.length; i++) {
-                        const value = Math.abs(dataArray[i] - 128) / 128;
-                        if (value > max) max = value;
-                    }
-                    fill.style.width = Math.min(100, max * 100) + '%';
-                    requestAnimationFrame(update);
-                };
-                update();
-            },
+  socket.on('connect', () => {
+    setConnStatus(true);
+    socket.emit('join-room', { roomId, userName: myName });
+  });
 
-            toggleMute() {
-                if (!this.localStream) return;
-                this.isMuted = !this.isMuted;
-                this.localStream.getAudioTracks().forEach(track => {
-                    track.enabled = !this.isMuted;
-                });
-                this.socket.emit('toggle-mute');
-                this.updateMuteBtn();
-            },
+  socket.on('disconnect', () => setConnStatus(false));
 
-            updateMuteBtn() {
-                const btn = document.getElementById('muteBtn');
-                if (this.isMuted) {
-                    btn.textContent = '🔇 Включить микрофон';
-                    btn.classList.add('btn-muted');
-                } else {
-                    btn.textContent = '🔊 Выключить микрофон';
-                    btn.classList.remove('btn-muted');
-                }
-            },
+  socket.on('room-joined', ({ userId, users: others }) => {
+    myId = userId;
+    addParticipant({ id: myId, name: myName, muted: false }, true);
+    others.forEach(u => {
+      users.set(u.id, u);
+      addParticipant(u, false);
+      createOffer(u.id);
+    });
+    sysMsg(`Вы вошли в комнату ${roomId}`);
+  });
 
-            renderUsers(users) {
-                const list = document.getElementById('usersList');
-                list.innerHTML = '<h3>👥 Участники:</h3>';
-                users.forEach(u => {
-                    const div = document.createElement('div');
-                    div.className = 'user-item';
-                    div.innerHTML = `
-                        <div class="status-dot ${u.muted ? 'status-muted' : ''}"></div>
-                        <span>${u.name} ${u.id === this.socket?.id ? '(вы)' : ''}</span>
-                        ${u.muted ? '<span>🔇</span>' : ''}
-                    `;
-                    list.appendChild(div);
-                });
-            },
+  socket.on('user-joined', (user) => {
+    users.set(user.id, user);
+    addParticipant(user, false);
+    sysMsg(`${user.name} присоединился`);
+  });
 
-            updateUserMute(userId, muted) {
-                document.querySelectorAll('.user-item').forEach(el => {
-                    const dot = el.querySelector('.status-dot');
-                    if (muted) dot?.classList.add('status-muted');
-                    else dot?.classList.remove('status-muted');
-                });
-            },
+  socket.on('user-left', ({ userId }) => {
+    const u = users.get(userId);
+    sysMsg(`${u?.name || 'Участник'} вышел`);
+    users.delete(userId);
+    removeParticipant(userId);
+    closePeer(userId);
+  });
 
-            leaveRoom() {
-                Object.values(this.peerConnections).forEach(pc => pc.close());
-                this.peerConnections = {};
-                
-                if (this.localStream) {
-                    this.localStream.getTracks().forEach(t => t.stop());
-                }
-                if (this.audioContext) {
-                    this.audioContext.close();
-                }
-                this.socket.disconnect();
-                
-                this.isConnected = false;
-                
-                document.getElementById('joinScreen').classList.remove('hidden');
-                document.getElementById('chatScreen').classList.add('hidden');
-                document.getElementById('joinBtn').disabled = false;
-                document.getElementById('joinBtn').textContent = 'Присоединиться';
-                
-                this.init();
-            }
-        };
+  socket.on('user-mute-changed', ({ userId, muted }) => {
+    const u = users.get(userId);
+    if (u) u.muted = muted;
+    updateParticipantMute(userId, muted);
+  });
 
-        window.onload = () => chatApp.init();
-    </script>
+  socket.on('offer', async ({ from, offer }) => {
+    const pc = getOrCreatePeer(from);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit('answer', { to: from, answer });
+  });
+
+  socket.on('answer', async ({ from, answer }) => {
+    const p = peers.get(from);
+    if (p) await p.pc.setRemoteDescription(new RTCSessionDescription(answer));
+  });
+
+  socket.on('ice-candidate', async ({ from, candidate }) => {
+    const p = peers.get(from);
+    if (p && candidate) {
+      try { await p.pc.addIceCandidate(new RTCIceCandidate(candidate)); }
+      catch(e) { /* ignore */ }
+    }
+  });
+
+  socket.on('chat-message', ({ from, name, text, ts }) => {
+    appendMessage(from === myId, name, text, ts);
+  });
+}
+
+// ═══════════════════════════════════════════════
+//  WebRTC
+// ═══════════════════════════════════════════════
+function getOrCreatePeer(remoteId) {
+  if (peers.has(remoteId)) return peers.get(remoteId).pc;
+  return createPeer(remoteId).pc;
+}
+
+function createPeer(remoteId) {
+  const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+
+  // Add local tracks
+  getOutboundStream().getTracks().forEach(t => pc.addTrack(t, getOutboundStream()));
+
+  pc.onicecandidate = ({ candidate }) => {
+    if (candidate) socket.emit('ice-candidate', { to: remoteId, candidate });
+  };
+
+  pc.ontrack = ({ streams }) => {
+    const stream = streams[0];
+    playRemoteStream(remoteId, stream);
+  };
+
+  pc.onconnectionstatechange = () => {
+    console.log(`[Peer ${remoteId}] state: ${pc.connectionState}`);
+  };
+
+  const entry = { pc };
+  peers.set(remoteId, entry);
+  return entry;
+}
+
+async function createOffer(remoteId) {
+  const pc = getOrCreatePeer(remoteId);
+  const offer = await pc.createOffer({ offerToReceiveAudio: true });
+  await pc.setLocalDescription(offer);
+  socket.emit('offer', { to: remoteId, offer });
+}
+
+function closePeer(remoteId) {
+  const p = peers.get(remoteId);
+  if (p) {
+    p.pc.close();
+    peers.delete(remoteId);
+    cancelAnimationFrame(meterAnimFrames.get(remoteId));
+    meterAnimFrames.delete(remoteId);
+  }
+  // Remove audio element
+  const el = document.getElementById('audio-' + remoteId);
+  if (el) el.remove();
+}
+
+function playRemoteStream(remoteId, stream) {
+  let el = document.getElementById('audio-' + remoteId);
+  if (!el) {
+    el = document.createElement('audio');
+    el.id = 'audio-' + remoteId;
+    el.autoplay = true;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+  }
+  el.srcObject = stream;
+
+  // Volume meter for remote speaker
+  const ctx = new AudioContext();
+  const src = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 256;
+  src.connect(analyser);
+  startMeter(remoteId, analyser);
+}
+
+// ═══════════════════════════════════════════════
+//  VOLUME METER
+// ═══════════════════════════════════════════════
+let localAnalyser = null;
+
+function startLocalMeter() {
+  if (!audioCtx || !sourceNode) return;
+  if (localAnalyser) return;
+  localAnalyser = audioCtx.createAnalyser();
+  localAnalyser.fftSize = 256;
+  sourceNode.connect(localAnalyser);
+  startMeter(myId, localAnalyser);
+}
+
+function startMeter(userId, analyser) {
+  const data = new Uint8Array(analyser.frequencyBinCount);
+  function tick() {
+    analyser.getByteFrequencyData(data);
+    let sum = 0;
+    for (let i = 0; i < data.length; i++) sum += data[i];
+    const avg = sum / data.length;
+    const pct = Math.min(100, avg * 1.5);
+
+    const bar = document.querySelector(`#p-${userId} .vol-bar`);
+    if (bar) bar.style.height = pct + '%';
+
+    // Speaking indicator
+    const avatar = document.querySelector(`#p-${userId} .p-avatar`);
+    if (avatar) avatar.classList.toggle('speaking', pct > 5);
+
+    meterAnimFrames.set(userId, requestAnimationFrame(tick));
+  }
+  cancelAnimationFrame(meterAnimFrames.get(userId));
+  meterAnimFrames.set(userId, requestAnimationFrame(tick));
+}
+
+// ═══════════════════════════════════════════════
+//  MUTE / NOISE
+// ═══════════════════════════════════════════════
+function toggleMute() {
+  muted = !muted;
+  localStream.getAudioTracks().forEach(t => { t.enabled = !muted; });
+  const btn = document.getElementById('mute-btn');
+  btn.textContent = muted ? '🔇' : '🎤';
+  btn.classList.toggle('muted', muted);
+  if (socket) socket.emit('toggle-mute', { muted });
+  updateParticipantMute(myId, muted);
+}
+
+function toggleNoise() {
+  noiseEnabled = !noiseEnabled;
+  const btn = document.getElementById('noise-btn');
+  btn.classList.toggle('noise-on', noiseEnabled);
+  btn.textContent = noiseEnabled ? '🔇' : '🎵';
+  showToast(noiseEnabled ? 'Шумоподавление включено' : 'Шумоподавление выключено');
+}
+
+// ═══════════════════════════════════════════════
+//  CHAT
+// ═══════════════════════════════════════════════
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && document.activeElement === document.getElementById('chat-input')) {
+    sendChat();
+  }
+});
+
+function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text || !socket) return;
+  socket.emit('chat-message', { text });
+  input.value = '';
+}
+
+function appendMessage(own, name, text, ts) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'msg' + (own ? ' own' : '');
+  const time = new Date(ts).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
+  div.innerHTML = `
+    <span class="meta">${own ? 'вы' : escHtml(name)} · ${time}</span>
+    <div class="bubble">${escHtml(text)}</div>
+  `;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function sysMsg(text) {
+  const msgs = document.getElementById('messages');
+  const div = document.createElement('div');
+  div.className = 'sys-msg';
+  div.textContent = text;
+  msgs.appendChild(div);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ═══════════════════════════════════════════════
+//  PARTICIPANTS UI
+// ═══════════════════════════════════════════════
+const COLORS = ['#7c6af7','#4ecdc4','#ff6b6b','#feca57','#48dbfb','#ff9ff3','#54a0ff','#5f27cd'];
+function avatarColor(name) {
+  let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return COLORS[Math.abs(h) % COLORS.length];
+}
+
+function addParticipant(user, isMe) {
+  users.set(user.id, user);
+  const list = document.getElementById('participants-list');
+  const col = avatarColor(user.name);
+  const initial = (user.name[0] || '?').toUpperCase();
+  const div = document.createElement('div');
+  div.className = 'participant';
+  div.id = 'p-' + user.id;
+  div.innerHTML = `
+    <div class="p-avatar" style="background:${col}22;color:${col};border:1.5px solid ${col}44">
+      ${initial}
+      <div class="speaking-ring"></div>
+    </div>
+    <div class="p-info">
+      <div class="p-name${isMe ? ' you' : ''}">${escHtml(user.name)}</div>
+    </div>
+    <div class="p-mute-icon${user.muted ? ' active' : ''}">🔇</div>
+    <div class="vol-bar-wrap"><div class="vol-bar"></div></div>
+  `;
+  list.appendChild(div);
+  updatePCount();
+
+  if (isMe) {
+    // slight delay to let AudioContext settle
+    setTimeout(startLocalMeter, 200);
+  }
+}
+
+function removeParticipant(userId) {
+  const el = document.getElementById('p-' + userId);
+  if (el) el.remove();
+  updatePCount();
+}
+
+function updateParticipantMute(userId, isMuted) {
+  const el = document.querySelector(`#p-${userId} .p-mute-icon`);
+  if (el) el.classList.toggle('active', isMuted);
+}
+
+function updatePCount() {
+  document.getElementById('p-count').textContent = `(${document.getElementById('participants-list').children.length})`;
+}
+
+// ═══════════════════════════════════════════════
+//  MISC
+// ═══════════════════════════════════════════════
+function setConnStatus(connected) {
+  document.getElementById('conn-dot').className = 'conn-dot' + (connected ? ' connected' : '');
+  document.getElementById('conn-label').textContent = connected ? 'Подключено' : 'Отключено';
+}
+
+function copyRoomId() {
+  navigator.clipboard.writeText(roomId).then(() => showToast('ID комнаты скопирован: ' + roomId));
+}
+
+let toastTimer = null;
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
+}
+
+function leaveRoom() {
+  if (socket) socket.disconnect();
+  peers.forEach((_, id) => closePeer(id));
+  if (localStream) localStream.getTracks().forEach(t => t.stop());
+  if (audioCtx) audioCtx.close();
+  location.reload();
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+</script>
 </body>
 </html>
