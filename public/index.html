@@ -571,10 +571,73 @@ async function joinLobby() {
 }
 
 // ═══════════════════════════════════════════════
-//  AUDIO + NOISE SUPPRESSION
+//  AUDIO + NOISE SUPPRESSION  (AudioWorklet, no glitches)
 // ═══════════════════════════════════════════════
+
+// Worklet code as a Blob URL — runs in dedicated audio thread, zero glitches
+const WORKLET_CODE = `
+class NoiseGateProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this._noiseFloor = 0;
+    this._gateGain   = 0;
+    this._holdSamples = 0;
+    // params arrive via port
+    this._enabled   = true;
+    this.port.onmessage = (e) => {
+      if (e.data.enabled !== undefined) this._enabled = e.data.enabled;
+    };
+  }
+
+  static get parameterDescriptors() { return []; }
+
+  process(inputs, outputs) {
+    const input  = inputs[0][0];
+    const output = outputs[0][0];
+    if (!input || !output) return true;
+
+    const SR        = sampleRate;           // global in worklet scope
+    const HOLD_SEC  = 0.15;                 // hold gate open 150 ms after speech ends
+    const ATTACK_TC = 0.008;               // 8 ms attack  (per-sample coeff)
+    const RELEASE_TC= 0.080;               // 80 ms release (per-sample coeff)
+    const attackK   = 1 - Math.exp(-1 / (SR * ATTACK_TC));
+    const releaseK  = 1 - Math.exp(-1 / (SR * RELEASE_TC));
+    const holdLen   = Math.floor(SR * HOLD_SEC);
+
+    // RMS of this block
+    let sum = 0;
+    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
+    const rms = Math.sqrt(sum / input.length);
+
+    // Very slow adaptive noise floor (leaky max)
+    this._noiseFloor = Math.max(this._noiseFloor * 0.9998 + rms * 0.0002, 1e-6);
+    const threshold = this._enabled
+      ? Math.max(this._noiseFloor * 4.0, 0.005)
+      : 0;
+
+    const gateOpen = !this._enabled || rms > threshold;
+    if (gateOpen) {
+      this._holdSamples = holdLen;
+    } else {
+      this._holdSamples = Math.max(0, this._holdSamples - input.length);
+    }
+    const targetGain = (gateOpen || this._holdSamples > 0) ? 1.0 : 0.0;
+
+    // Per-sample smooth gain — eliminates clicks/crackle
+    for (let i = 0; i < output.length; i++) {
+      const k = targetGain > this._gateGain ? attackK : releaseK;
+      this._gateGain += (targetGain - this._gateGain) * k;
+      output[i] = input[i] * this._gateGain;
+    }
+    return true;
+  }
+}
+registerProcessor('noise-gate', NoiseGateProcessor);
+`;
+
+let workletNode = null;
+
 async function initAudio() {
-  // Request mic with browser built-in noise suppression and echo cancellation
   const constraints = {
     audio: {
       echoCancellation: true,
@@ -589,56 +652,43 @@ async function initAudio() {
 }
 
 async function buildAudioPipeline() {
-  if (audioCtx) { audioCtx.close(); }
+  if (audioCtx) audioCtx.close();
 
-  audioCtx = new AudioContext({ sampleRate: 48000 });
+  audioCtx = new AudioContext({ sampleRate: 48000, latencyHint: 'interactive' });
+
+  // Register worklet from blob (no external file needed)
+  const blob = new Blob([WORKLET_CODE], { type: 'application/javascript' });
+  const blobUrl = URL.createObjectURL(blob);
+  await audioCtx.audioWorklet.addModule(blobUrl);
+  URL.revokeObjectURL(blobUrl);
+
   sourceNode = audioCtx.createMediaStreamSource(localStream);
+
+  // Noise gate worklet
+  workletNode = new AudioWorkletNode(audioCtx, 'noise-gate', {
+    numberOfInputs: 1, numberOfOutputs: 1,
+    outputChannelCount: [1]
+  });
+  workletNode.port.postMessage({ enabled: noiseEnabled });
+
+  // Light compressor to smooth peaks without distortion
+  const compressor = audioCtx.createDynamicsCompressor();
+  compressor.threshold.value = -24;
+  compressor.knee.value       = 10;
+  compressor.ratio.value      = 3;
+  compressor.attack.value     = 0.003;
+  compressor.release.value    = 0.15;
+
   gainNode = audioCtx.createGain();
-  gainNode.gain.value = 1.2;
-
-  // ScriptProcessor for software noise gate (suppresses low-level noise below threshold)
-  const bufSize = 2048;
-  const noiseGateNode = audioCtx.createScriptProcessor(bufSize, 1, 1);
-  let noiseFloor = 0;
-  let gateOpen = false;
-  let holdCounter = 0;
-  const HOLD_FRAMES = 8;
-  const ATTACK  = 0.15;
-  const RELEASE = 0.05;
-  let gateGain = 0;
-
-  noiseGateNode.onaudioprocess = (e) => {
-    const input  = e.inputBuffer.getChannelData(0);
-    const output = e.outputBuffer.getChannelData(0);
-
-    // RMS
-    let sum = 0;
-    for (let i = 0; i < input.length; i++) sum += input[i] * input[i];
-    const rms = Math.sqrt(sum / input.length);
-
-    // Adaptive noise floor
-    noiseFloor = noiseFloor * 0.999 + rms * 0.001;
-    const threshold = noiseEnabled ? Math.max(noiseFloor * 3.5, 0.006) : 0;
-
-    if (rms > threshold) {
-      gateOpen = true;
-      holdCounter = HOLD_FRAMES;
-    } else {
-      if (holdCounter > 0) holdCounter--;
-      else gateOpen = false;
-    }
-
-    const targetGain = (gateOpen || !noiseEnabled) ? 1 : 0;
-    for (let i = 0; i < output.length; i++) {
-      gateGain += (targetGain - gateGain) * (targetGain > gateGain ? ATTACK : RELEASE);
-      output[i] = input[i] * gateGain;
-    }
-  };
+  gainNode.gain.value = 1.0;   // no extra boost needed — compressor handles levels
 
   destinationNode = audioCtx.createMediaStreamDestination();
-  sourceNode.connect(noiseGateNode);
-  noiseGateNode.connect(gainNode);
-  gainNode.connect(destinationNode);
+
+  sourceNode
+    .connect(workletNode)
+    .connect(compressor)
+    .connect(gainNode)
+    .connect(destinationNode);
 
   processedStream = destinationNode.stream;
 }
@@ -840,6 +890,8 @@ function toggleMute() {
 
 function toggleNoise() {
   noiseEnabled = !noiseEnabled;
+  // Tell the AudioWorklet running in the audio thread
+  if (workletNode) workletNode.port.postMessage({ enabled: noiseEnabled });
   const btn = document.getElementById('noise-btn');
   btn.classList.toggle('noise-on', noiseEnabled);
   btn.textContent = noiseEnabled ? '🔇' : '🎵';
