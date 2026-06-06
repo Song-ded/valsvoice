@@ -27,16 +27,17 @@ io.on('connection', (socket) => {
   console.log(`[+] Connected: ${socket.id}`);
 
   // Join room
-  socket.on('join-room', ({ roomId, userName }) => {
+  socket.on('join-room', ({ roomId, userName, userAvatar }) => {
     const userId = socket.id;
-    const name = (userName || 'Guest').slice(0, 24);
+    const name   = (userName   || 'Guest').slice(0, 24);
+    const avatar = (userAvatar || '').slice(0, 512); // Google avatar URL
 
     if (!rooms.has(roomId)) {
       rooms.set(roomId, { users: new Map() });
     }
 
     const room = rooms.get(roomId);
-    const user = { id: userId, name, muted: false };
+    const user = { id: userId, name, avatar, muted: false };
     room.users.set(userId, user);
 
     socket.join(roomId);
